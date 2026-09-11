@@ -1,0 +1,9 @@
+# Replace this hostname with your own domain and point DNS to the server.
+resume.example.com {
+    encode zstd gzip
+
+    reverse_proxy 127.0.0.1:8080 {
+        # Overwrite, rather than trust a client-supplied forwarding chain.
+        header_up X-Forwarded-For {remote_host}
+    }
+}

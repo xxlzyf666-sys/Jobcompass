@@ -1,0 +1,11 @@
+{
+  "name": "jobcompass-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/vendor-pdf.mjs"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.3.289"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "input": {
+    "role": "backend",
+    "resume": "示例候选人｜后端开发\n以下为虚构材料，仅用于展示报告结构。\n\n工作经历\n2022—2026 年，示例科技（虚构），后端开发工程师。\n参与电商订单与库存系统开发，负责需求拆解、接口设计和日常维护。\n使用 Go 和 Gin 开发订单服务，通过 gRPC 与库存服务通信。\n负责 MySQL 表结构维护及订单查询接口优化。\n使用 Redis 缓存热点商品数据，减少数据库重复查询。\n使用 Docker 打包服务，配合运维同事发布。\n使用 Prometheus 和 Grafana 观察服务延迟与错误率，参与接口超时故障的排查和复盘。\n为订单状态流转编写单元测试，在代码评审中关注错误处理和接口兼容性。\n\n项目经历\n订单服务重构：整理状态流转规则，拆分查询与写入接口，配合前端和测试团队完成上线。\n本示例未填写具体性能数据；实际使用时应由本人补充可核实的结果。",
+    "jd": "Go 后端开发工程师\n负责订单与库存等业务服务的设计、开发和维护，与产品、前端及测试团队协作。\n\n岗位要求\n1. 熟悉 Go 语言，具备后端服务开发经验。\n2. 熟悉 MySQL，能够进行索引设计和慢查询优化。\n3. 熟悉 Redis 缓存设计，理解缓存与数据库的一致性问题。\n4. 具备微服务开发经验，能够使用 gRPC 完成服务间通信。\n5. 有 Kubernetes 部署和运维经验者优先。\n6. 能够使用监控工具定位线上故障，并总结处理过程。\n请在简历中说明自己在项目中的具体职责和实际解决的问题。"
+  },
+  "report": {
+    "title": "Go 后端开发岗位对照",
+    "summary": "简历中已有 Go 服务开发、gRPC 通信和监控排障的直接经历。优先补充 MySQL 优化的具体过程，以及 Redis 缓存一致性的处理方式；Kubernetes 经验尚未在文字中体现。",
+    "requirements": [
+      {"id":"r1","title":"Go 后端服务开发","jd_quote":"熟悉 Go 语言，具备后端服务开发经验。","priority":"required","status":"supported","resume_quote":"使用 Go 和 Gin 开发订单服务，通过 gRPC 与库存服务通信。","explanation":"这段经历直接说明了 Go 在业务服务中的实际使用，并交代了服务的用途。"},
+      {"id":"r2","title":"MySQL 索引与慢查询优化","jd_quote":"熟悉 MySQL，能够进行索引设计和慢查询优化。","priority":"required","status":"needs_detail","resume_quote":"负责 MySQL 表结构维护及订单查询接口优化。","explanation":"已有查询优化相关表述，但尚未说明怎样定位慢查询、设计索引，以及如何验证改动效果。"},
+      {"id":"r3","title":"Redis 缓存与数据一致性","jd_quote":"熟悉 Redis 缓存设计，理解缓存与数据库的一致性问题。","priority":"required","status":"needs_detail","resume_quote":"使用 Redis 缓存热点商品数据，减少数据库重复查询。","explanation":"引用能够说明 Redis 的使用场景；缓存更新、失效及与数据库保持一致的处理方式仍需补充。"},
+      {"id":"r4","title":"微服务与 gRPC 通信","jd_quote":"具备微服务开发经验，能够使用 gRPC 完成服务间通信。","priority":"required","status":"supported","resume_quote":"使用 Go 和 Gin 开发订单服务，通过 gRPC 与库存服务通信。","explanation":"引用明确提到了服务之间通过 gRPC 通信，能支持该项要求。"},
+      {"id":"r5","title":"Kubernetes 部署与运维","jd_quote":"有 Kubernetes 部署和运维经验者优先。","priority":"preferred","status":"not_found","resume_quote":"","explanation":"简历提到了 Docker，但未找到 Kubernetes 部署或运维经历。这是 JD 的加分项，未写出不等于本人不会。"},
+      {"id":"r6","title":"线上监控与故障排查","jd_quote":"能够使用监控工具定位线上故障，并总结处理过程。","priority":"required","status":"supported","resume_quote":"使用 Prometheus 和 Grafana 观察服务延迟与错误率，参与接口超时故障的排查和复盘。","explanation":"引用同时包含监控工具、观察指标、故障排查和复盘，与岗位要求直接相关。"}
+    ],
+    "actions": [
+      {"requirement_id":"r2","title":"把“查询优化”写成一次具体排查","suggestion":"在订单查询接口优化的经历后，补充当时出现的问题、你采用的定位方法和实际修改。若保留了可信的前后数据，再说明验证结果。","question":"当时哪个查询出现了什么问题？你如何判断原因，最后具体改了哪一处？"},
+      {"requirement_id":"r3","title":"说明缓存更新时的处理方式","suggestion":"在热点商品缓存的经历中，补充数据修改后如何更新或失效缓存，以及你实际处理过的一致性问题。只写亲自参与或能够解释的方案。","question":"商品信息在数据库中发生变化时，缓存是怎样更新的？出现过哪些异常，你做了什么？"},
+      {"requirement_id":"r5","title":"确认是否有可补充的 Kubernetes 经历","suggestion":"先核实自己是否参与过相关部署或运维。如果没有，保留真实的 Docker 使用经历即可，不把工具名称追加为已经掌握的技能。","question":"你是否实际操作过 Kubernetes？如果有，请描述自己完成过的具体任务。"}
+    ],
+    "counts":{"supported":3,"needs_detail":2,"not_found":1},
+    "rubric_version":"backend-evidence-v1.0",
+    "model":"固定示例，未调用模型",
+    "example":true
+  }
+}

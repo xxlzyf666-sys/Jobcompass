@@ -1,0 +1,11 @@
+/data/
+/bin/
+/node_modules/
+/.env
+/.cache/
+/artifacts/
+/*.tar.gz
+/*.tar.gz.sha256
+*.db
+*.db-shm
+*.db-wal

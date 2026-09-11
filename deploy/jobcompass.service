@@ -1,0 +1,31 @@
+[Unit]
+Description=JobCompass private resume diagnosis
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jobcompass
+Group=jobcompass
+WorkingDirectory=/opt/jobcompass
+EnvironmentFile=/opt/jobcompass/.env
+Environment=APP_ENV=production
+Environment=GOMEMLIMIT=192MiB
+ExecStart=/opt/jobcompass/jobcompass
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/jobcompass/data
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=4096
+MemoryHigh=256M
+MemoryMax=384M
+TasksMax=96
+
+[Install]
+WantedBy=multi-user.target
