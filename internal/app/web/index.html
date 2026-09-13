@@ -9,7 +9,9 @@
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/preparation.css">
+  <link rel="stylesheet" href="/assets/billing.css">
   <link rel="modulepreload" id="preparation-module" href="/assets/preparation.js">
+  <link rel="modulepreload" id="billing-module" href="/assets/billing.js">
   <script type="module" src="/assets/app.js"></script>
 </head>
 <body>
@@ -24,6 +26,7 @@
         <a href="#start" data-nav="start" aria-current="page">开始诊断</a>
         <a href="#example" data-nav="example">示例报告</a>
         <a href="#history" data-nav="history">我的报告<span class="nav-arrow" aria-hidden="true">↗</span></a>
+        <a href="#account" id="account-nav" data-nav="account">登录 / 次数</a>
       </nav>
       <span class="beta-tag">后端开发 · 内测</span>
     </div>
@@ -83,6 +86,7 @@
             <button type="submit" class="button primary" id="submit-diagnosis" disabled><span>开始逐项诊断</span><span aria-hidden="true">↗</span></button>
           </div>
           <p id="form-error" class="form-error" role="alert" hidden></p>
+          <div id="diagnosis-cost" class="billing-cost" hidden></div>
         </form>
       </section>
 
@@ -94,6 +98,7 @@
     <section id="progress-view" class="view narrow-view" hidden aria-labelledby="progress-title"><a href="#history" class="text-link muted">← 我的报告</a><div class="progress-card"><div class="compass-loader" aria-hidden="true"><span>✦</span></div><p class="eyebrow">材料已安全提交</p><h1 id="progress-title">正在等待分析</h1><p id="progress-description">任务已进入队列，完成后会在这里显示。</p><div class="progress-stages"><span id="stage-saved">✓ 已保存</span><span id="stage-analyzing">正在排队</span><span>生成对照报告</span></div><p class="muted-note">你可以离开此页，稍后在“我的报告”中继续查看。</p></div><div id="progress-recovery"></div><div class="progress-footer"><button type="button" class="text-link danger" data-delete-current>取消分析并删除材料</button></div><p id="poll-error" class="form-error" role="alert" hidden></p></section>
 
     <section id="preparation-view" class="view" hidden aria-label="求职准备工作台"><div id="preparation-root"></div></section>
+    <section id="billing-view" class="view" hidden aria-label="账号、订单与收款"><div id="billing-root"></div></section>
 
     <section id="report-view" class="view" hidden aria-label="诊断报告"><div id="report-root"></div></section>
 
@@ -104,11 +109,11 @@
 
   <footer class="site-footer"><div><span class="footer-brand">岗位罗盘</span><span>让真实的经历，被更清楚地看见。</span></div><div><button type="button" data-open-dialog="privacy-dialog">隐私与材料处理</button><button type="button" data-open-dialog="about-dialog">使用说明</button><span>© 2026 JobCompass</span></div></footer>
 
-  <dialog id="privacy-dialog" class="modal"><div class="modal-heading"><h2>你的材料如何处理</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><div class="privacy-copy"><p>确认同意并点击生成后，相关文字才会提交 AI 分析。手动保存简历版本只保存到本站，不会自动调用模型。</p><dl><dt>PDF 原文件</dt><dd>在当前浏览器提取文字，不上传原始文件。提取完成后请检查内容。</dd><dt>AI 接收方</dt><dd>诊断与简历精修使用的简历、JD 和确认的补充事实，以及模拟面试使用的简历快照和相关回答，会发送给 <strong id="privacy-provider">Anthropic Claude</strong>，用于完成你选择的诊断、改写或面试练习。接收方会按其服务政策处理请求。</dd><dt>保存位置与期限</dt><dd>服务部署位置：<strong id="privacy-region">日本</strong>。提交文字、报告、岗位版本、补充事实和面试记录加密保存，均随原报告最迟在首次提交后 <strong id="privacy-retention">7 天</strong>删除。</dd><dt>访问与删除</dt><dd>报告默认私有。当前浏览器的会话或你提供的恢复码可授予访问权。恢复码同时授予该报告及其求职准备资料的访问权。你可以随时删除报告及全部关联资料；删除后恢复码也会失效。</dd><dt>请妥善保存</dt><dd>我们不把材料用于训练或其他用途。恢复码具有访问权限，请勿公开。导出的文件由你自行保管；你在模型接收方的相关权利需按其政策处理。</dd></dl><p class="muted-note">引用来源核对不代表 AI 的理解一定正确。提交前可以移除联系方式等不影响分析的内容。</p></div><button type="button" class="button primary full-width" data-close-dialog>我了解了</button></dialog>
+  <dialog id="privacy-dialog" class="modal"><div class="modal-heading"><h2>你的材料如何处理</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><div class="privacy-copy"><p>确认同意并点击生成后，相关文字才会提交 AI 分析。手动保存简历版本只保存到本站，不会自动调用模型。</p><dl><dt>PDF 原文件</dt><dd>在当前浏览器提取文字，不上传原始文件。提取完成后请检查内容。</dd><dt>AI 接收方</dt><dd>诊断与简历精修使用的简历、JD 和确认的补充事实，以及模拟面试使用的简历快照和相关回答，会发送给 <strong id="privacy-provider">Anthropic Claude</strong>，用于完成你选择的诊断、改写或面试练习。接收方会按其服务政策处理请求。</dd><dt>保存位置与期限</dt><dd>服务部署位置：<strong id="privacy-region">日本</strong>。提交文字、报告、岗位版本、补充事实和面试记录加密保存，均随原报告最迟在首次提交后 <strong id="privacy-retention">7 天</strong>删除。</dd><dt>访问与删除</dt><dd>报告默认私有。当前浏览器的会话或你提供的恢复码可授予访问权。恢复码同时授予该报告及其求职准备资料的访问权。你可以随时删除报告及全部关联资料；删除后恢复码也会失效。</dd><dt>账号与购买记录</dt><dd>账号密码经加盐哈希保存；个人收款码、订单快照和交易单号加密保存。账号、订单、退款与次数记录独立于报告保留，用于登录、核款、售后和对账，不随报告的 7 天期限删除。账号恢复码与报告恢复码不同，请分别保管。</dd><dt>请妥善保存</dt><dd>我们不把材料用于训练或其他用途。恢复码具有访问权限，请勿公开。导出的文件由你自行保管；你在模型接收方的相关权利需按其政策处理。</dd></dl><p class="muted-note">引用来源核对不代表 AI 的理解一定正确。提交前可以移除联系方式等不影响分析的内容。</p></div><button type="button" class="button primary full-width" data-close-dialog>我了解了</button></dialog>
 
-  <dialog id="recover-dialog" class="modal compact-modal"><div class="modal-heading"><h2>找回你的报告</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><p class="modal-description">粘贴创建报告时保存的恢复码。恢复后，当前浏览器也能查看和删除这份报告。</p><form id="recover-form"><label class="field-label" for="recovery-input">报告恢复码</label><textarea id="recovery-input" rows="3" placeholder="JC-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX" required maxlength="100" spellcheck="false" autocomplete="off"></textarea><p id="recovery-error" class="form-error" role="alert" hidden></p><button type="submit" id="recover-submit" class="button primary full-width">找回报告 <span aria-hidden="true">↗</span></button></form><p class="muted-note">到期或已删除的报告无法恢复。</p></dialog>
+  <dialog id="recover-dialog" class="modal compact-modal"><div class="modal-heading"><h2>找回你的报告</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><p class="modal-description">粘贴创建报告时保存的恢复码。恢复后，当前浏览器也能查看和删除这份报告。</p><form id="recover-form"><label class="field-label" for="recovery-input">报告恢复码</label><textarea id="recovery-input" rows="3" placeholder="JC-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX" required maxlength="100" spellcheck="false" autocomplete="off"></textarea><p id="recovery-error" class="form-error" role="alert" hidden></p><button type="submit" id="recover-submit" class="button primary full-width">找回报告 <span aria-hidden="true">↗</span></button></form><p class="muted-note">到期或已删除的报告无法恢复。报告恢复码不授予账号或购买次数；找回账号请使用账号登录页的恢复入口。</p></dialog>
 
-  <dialog id="delete-dialog" class="modal compact-modal"><div class="modal-heading"><h2>删除这份报告？</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><p class="modal-description">提交的文字、诊断结果、全部岗位简历版本、补充事实、面试回答与复盘和访问权限都会删除，正在进行的生成会取消。恢复码随即失效。</p><p id="delete-error" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button secondary" data-close-dialog>保留报告</button><button type="button" id="confirm-delete" class="button danger-button">删除材料与报告</button></div></dialog>
+  <dialog id="delete-dialog" class="modal compact-modal"><div class="modal-heading"><h2>删除这份报告？</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><p class="modal-description">提交的文字、诊断结果、全部岗位简历版本、补充事实、面试回答与复盘和访问权限都会删除，正在进行的生成会取消。恢复码随即失效。尚未生成成功的预占次数会退回；已使用次数、账号和订单记录仍保留。</p><p id="delete-error" class="form-error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button secondary" data-close-dialog>保留报告</button><button type="button" id="confirm-delete" class="button danger-button">删除材料与报告</button></div></dialog>
 
   <dialog id="about-dialog" class="modal compact-modal"><div class="modal-heading"><h2>怎样用好这份报告</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭">×</button></div><div class="privacy-copy"><p>首版面向后端开发岗位，一次分析一份简历和一个目标 JD。</p><p><strong>已有依据</strong>：文字中存在直接相关的经历。<br><strong>待补充</strong>：写到了相关内容，具体细节还不充分。<br><strong>未体现</strong>：文字中没有找到明确表述，不代表你没有这项能力。</p><p>先查看引用，再进入“求职准备”：回答追问、逐条采纳改写、保存岗位版本，并基于成稿进行文字模拟面试。分类数量衡量本次文本的证据分布，不代表能力排名或录用概率。</p><p>导出 PDF 时，在浏览器打印窗口选择“另存为 PDF”；可关闭浏览器附加的页眉页脚，让版面更整洁。</p></div><button type="button" class="button primary full-width" data-close-dialog>开始查看</button></dialog>
 

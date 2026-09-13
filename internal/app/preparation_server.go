@@ -36,6 +36,9 @@ type preparationRequest struct {
 }
 
 func preparationError(w http.ResponseWriter, err error) {
+	if billingError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		jsonError(w, 404, "求职准备资料不存在、已到期，或当前浏览器没有访问权限。")
@@ -46,7 +49,7 @@ func preparationError(w http.ResponseWriter, err error) {
 		jsonError(w, 503, "目前生成任务较多，请稍后再试。")
 	case errors.Is(err, ErrRateLimit):
 		w.Header().Set("Retry-After", "3600")
-		jsonError(w, 429, "本时段的准备次数已用完，请稍后继续；已保存内容仍可查看和导出。")
+		jsonError(w, 429, "已达到本时段的生成频率上限，请稍后继续；本次未扣除购买次数，已保存内容仍可查看和导出。")
 	default:
 		jsonError(w, 500, "求职准备资料暂时无法读写，请稍后重试。")
 	}
@@ -59,7 +62,12 @@ func (a *App) preparationResponse(w http.ResponseWriter, r *http.Request, owner 
 		return
 	}
 	_, supported := a.provider.(PreparationProvider)
-	jsonResponse(w, status, map[string]any{"preparation": p, "task": task, "expires_at": expires, "ready": a.provider.Ready() && supported})
+	settings, err := a.store.BillingSettings(r.Context())
+	if err != nil {
+		preparationError(w, err)
+		return
+	}
+	jsonResponse(w, status, map[string]any{"preparation": p, "task": task, "expires_at": expires, "ready": a.provider.Ready() && supported, "billing_enabled": settings.Enabled})
 }
 func (a *App) getPreparation(w http.ResponseWriter, r *http.Request) {
 	owner, ok := a.authorize(w, r, false)
@@ -148,6 +156,7 @@ func (a *App) changePreparation(w http.ResponseWriter, r *http.Request) {
 		}
 		if text != v.Text || jd != v.JD || factsChanged {
 			v.Questions, v.Edits, v.Notes = nil, nil, nil
+			v.RefinementID, v.RefinementComplete = "", false
 		}
 		v.Name, v.Text, v.JD, v.UpdatedAt = name, text, jd, now.Unix()
 	case "delete_version":
@@ -164,6 +173,15 @@ func (a *App) changePreparation(w http.ResponseWriter, r *http.Request) {
 		if v == nil {
 			preparationError(w, ErrNotFound)
 			return
+		}
+		if req.Action == "questions" {
+			cycle, e := randomHex(16)
+			if e != nil {
+				preparationError(w, e)
+				return
+			}
+			v.RefinementID, v.RefinementComplete = cycle, false
+			v.Questions, v.Edits, v.Notes = nil, nil, nil
 		}
 		if req.Action == "rewrite" {
 			if !req.Confirmed || len(v.Questions) == 0 || len(req.Answers) != len(v.Questions) {

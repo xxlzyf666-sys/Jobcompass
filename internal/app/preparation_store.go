@@ -138,6 +138,9 @@ func (s *Store) SavePreparation(ctx context.Context, owner, ip, id string, p Pre
 		if _, err = tx.ExecContext(ctx, `INSERT INTO preparation_tasks(id,diagnosis_id,kind,revision,status,input_cipher,created_at,updated_at,next_attempt_at) VALUES(?,?,?,?,'pending',?,?,?,?)`, taskID, id, input.Kind, p.Revision, data, now.Unix(), now.Unix(), now.Unix()); err != nil {
 			return err
 		}
+		if err = s.reservePreparationCredit(ctx, tx, owner, id, taskID, *input, now); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

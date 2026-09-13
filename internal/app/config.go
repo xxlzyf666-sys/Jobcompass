@@ -21,6 +21,7 @@ type Config struct {
 	Workers, QueueLimit, IPQuota, SessionQuota                              int
 	PreparationIPQuota, PreparationSessionQuota                             int
 	Retention, RequestTimeout                                               time.Duration
+	BillingAdminKey                                                         string
 }
 
 func LoadEnvFile(path string) error {
@@ -61,9 +62,13 @@ func LoadConfig() (Config, error) {
 		DataDir: env("DATA_DIR", "./data"), APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: os.Getenv("ANTHROPIC_MODEL"),
 		BaseURL:      strings.TrimRight(env("ANTHROPIC_BASE_URL", "https://api.anthropic.com"), "/"),
 		ProviderName: env("PROVIDER_NAME", "Anthropic Claude"), DataRegion: env("DATA_REGION", "日本"),
-		Production: os.Getenv("APP_ENV") == "production",
+		Production:      os.Getenv("APP_ENV") == "production",
+		BillingAdminKey: strings.TrimSpace(os.Getenv("BILLING_ADMIN_KEY")),
 	}
 	var err error
+	if c.BillingAdminKey != "" && (len(c.BillingAdminKey) < 32 || len(c.BillingAdminKey) > 128) {
+		return c, errors.New("BILLING_ADMIN_KEY must contain 32 to 128 characters")
+	}
 	for _, setting := range []struct {
 		name               string
 		target             *int

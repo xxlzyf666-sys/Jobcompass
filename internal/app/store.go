@@ -235,6 +235,9 @@ func (s *Store) Create(ctx context.Context, owner, ip string, input Input, confi
 	if _, err = tx.ExecContext(ctx, "INSERT INTO diagnosis_access(diagnosis_id,owner_id) VALUES(?,?)", id, owner); err != nil {
 		return "", "", false, err
 	}
+	if err = s.reserveBillingCredit(ctx, tx, owner, "diagnosis:"+id, "diagnosis:"+id, id, "diagnosis", true, false, now); err != nil {
+		return "", "", false, err
+	}
 	if err = tx.Commit(); err != nil {
 		return "", "", false, err
 	}
@@ -385,6 +388,8 @@ func (s *Store) Cleanup(ctx context.Context, now time.Time) error {
 		{"DELETE FROM diagnoses WHERE expires_at<=?", now.Unix()},
 		{"DELETE FROM sessions WHERE expires_at<=?", now.Unix()},
 		{"DELETE FROM rate_limits WHERE window_start<?", now.Add(-48 * time.Hour).Unix()},
+		{"DELETE FROM billing_admin_sessions WHERE expires_at<=?", now.Unix()},
+		{"UPDATE billing_orders SET status='expired',revision=revision+1,updated_at=unixepoch() WHERE status='awaiting_payment' AND expires_at<=?", now.Unix()},
 	} {
 		if _, err = tx.ExecContext(ctx, statement.query, statement.value); err != nil {
 			return err

@@ -10,7 +10,9 @@ var preparationPrompt string
 
 func (p *ClaudeProvider) Prepare(ctx context.Context, input PreparationInput) (PreparationOutput, Usage, error) {
 	var output PreparationOutput
-	_, usage, err := p.callTool(ctx, input, preparationPrompt, "deliver_preparation", preparationSchema(input), 8000, &output)
+	providerInput := input
+	providerInput.Version.RefinementID, providerInput.Version.RefinementComplete = "", false
+	_, usage, err := p.callTool(ctx, providerInput, preparationPrompt, "deliver_preparation", preparationSchema(input), 8000, &output)
 	if err == nil {
 		err = validatePreparationOutput(&output, input)
 	}

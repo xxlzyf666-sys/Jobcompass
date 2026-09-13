@@ -27,14 +27,15 @@ type runningJob struct {
 	parent  string
 }
 type App struct {
-	config   Config
-	store    *Store
-	provider Provider
-	mux      *http.ServeMux
-	wake     chan struct{}
-	jobsMu   sync.Mutex
-	jobs     map[string]runningJob
-	index    []byte
+	config    Config
+	store     *Store
+	provider  Provider
+	mux       *http.ServeMux
+	wake      chan struct{}
+	jobsMu    sync.Mutex
+	jobs      map[string]runningJob
+	index     []byte
+	authSlots chan struct{}
 }
 
 func New(config Config, provider Provider) (*App, error) {
@@ -59,7 +60,7 @@ func New(config Config, provider Provider) (*App, error) {
 		return nil, err
 	}
 	// Content versions prevent a newly deployed page from using cached old UI code.
-	for _, name := range []string{"app.css", "app.js", "preparation.css", "preparation.js"} {
+	for _, name := range []string{"app.css", "app.js", "preparation.css", "preparation.js", "billing.css", "billing.js"} {
 		asset, readErr := embedded.ReadFile("web/" + name)
 		if readErr != nil {
 			store.Close()
@@ -67,7 +68,7 @@ func New(config Config, provider Provider) (*App, error) {
 		}
 		index = bytes.ReplaceAll(index, []byte("/assets/"+name), []byte("/assets/"+name+"?v="+digest(string(asset))[:12]))
 	}
-	a := &App{config: config, store: store, provider: provider, mux: http.NewServeMux(), wake: make(chan struct{}, 1), jobs: map[string]runningJob{}, index: index}
+	a := &App{config: config, store: store, provider: provider, mux: http.NewServeMux(), wake: make(chan struct{}, 1), jobs: map[string]runningJob{}, index: index, authSlots: make(chan struct{}, 2)}
 	a.routes()
 	return a, nil
 }
@@ -151,6 +152,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("GET /api/diagnoses/{id}/preparation", a.getPreparation)
 	a.mux.HandleFunc("POST /api/diagnoses/{id}/preparation", a.changePreparation)
 	a.mux.HandleFunc("GET /api/diagnoses/{id}/versions/{version}/export", a.exportResume)
+	a.billingRoutes()
 }
 
 func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +170,17 @@ func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) {
 		}
 		http.SetCookie(w, &http.Cookie{Name: "jc_session", Value: token, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(a.config.Origin, "https://"), SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600})
 	}
-	jsonResponse(w, 200, map[string]any{"csrf": a.store.privateHash("csrf:" + token), "ready": a.provider.Ready(), "provider": a.config.ProviderName, "region": a.config.DataRegion, "retention_hours": int(a.config.Retention.Hours()), "consent_version": consentVersion})
+	settings, err := a.store.BillingSettings(r.Context())
+	if err != nil {
+		jsonError(w, 503, "暂时无法读取服务状态，请稍后重试。")
+		return
+	}
+	account, err := a.store.BillingAccount(r.Context(), owner)
+	if err != nil {
+		jsonError(w, 503, "暂时无法读取账号状态，请稍后重试。")
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"csrf": a.store.privateHash("csrf:" + token), "ready": a.provider.Ready(), "provider": a.config.ProviderName, "region": a.config.DataRegion, "retention_hours": int(a.config.Retention.Hours()), "consent_version": consentVersion, "billing_enabled": settings.Enabled, "account": account})
 }
 
 func (a *App) authorize(w http.ResponseWriter, r *http.Request, write bool) (string, bool) {
@@ -245,10 +257,13 @@ func (a *App) createDiagnosis(w http.ResponseWriter, r *http.Request) {
 	}
 	id, code, duplicate, err := a.store.Create(r.Context(), owner, a.clientIP(r), input, a.config, time.Now())
 	if err != nil {
+		if billingError(w, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrRateLimit):
 			w.Header().Set("Retry-After", "3600")
-			jsonError(w, 429, "已达到当前体验次数，请稍后再来。")
+			jsonError(w, 429, "已达到当前诊断频率上限，请稍后再来；本次未扣除购买次数。")
 		case errors.Is(err, ErrQueueFull):
 			w.Header().Set("Retry-After", "30")
 			jsonError(w, 503, "目前排队人数较多，请稍后再试。")

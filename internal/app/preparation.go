@@ -33,16 +33,18 @@ type ResumeEdit struct {
 	Status   string     `json:"status"`
 }
 type ResumeVersion struct {
-	ID        string               `json:"id"`
-	Name      string               `json:"name"`
-	JD        string               `json:"jd"`
-	Text      string               `json:"text"`
-	Facts     []string             `json:"facts"`
-	Questions []RefinementQuestion `json:"questions"`
-	Edits     []ResumeEdit         `json:"edits"`
-	Notes     []string             `json:"notes"`
-	CreatedAt int64                `json:"created_at"`
-	UpdatedAt int64                `json:"updated_at"`
+	ID                 string               `json:"id"`
+	Name               string               `json:"name"`
+	JD                 string               `json:"jd"`
+	Text               string               `json:"text"`
+	Facts              []string             `json:"facts"`
+	Questions          []RefinementQuestion `json:"questions"`
+	Edits              []ResumeEdit         `json:"edits"`
+	Notes              []string             `json:"notes"`
+	CreatedAt          int64                `json:"created_at"`
+	UpdatedAt          int64                `json:"updated_at"`
+	RefinementID       string               `json:"refinement_id,omitempty"`
+	RefinementComplete bool                 `json:"refinement_complete,omitempty"`
 }
 type InterviewQuestion struct {
 	ID          string `json:"id"`
@@ -251,6 +253,9 @@ func applyPreparationOutput(p *Preparation, in PreparationInput, out Preparation
 			v.Questions, v.Edits, v.Notes = out.Questions, nil, nil
 		} else {
 			v.Edits, v.Notes = out.Edits, out.Notes
+			if in.Kind == "rewrite" {
+				v.RefinementComplete = true
+			}
 		}
 		v.UpdatedAt = now
 		return nil

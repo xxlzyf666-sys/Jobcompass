@@ -1,10 +1,11 @@
 const { PreparationUI } = await import(document.querySelector('#preparation-module').href);
+const { BillingUI } = await import(document.querySelector('#billing-module').href);
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHTML = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const labels = { supported: '已有依据', needs_detail: '待补充', not_found: '未体现', pending: '排队中', running: '分析中', done: '已完成', failed: '未完成' };
 const state = { config: null, example: null, diagnosis: null, recovery: null, filter: 'all', epoch: 0, pollTimer: null, toastTimer: null, pdfEpoch: 0, pdfTask: null, submitting: false, deletingID: null };
-const views = ['editor', 'progress', 'report', 'history', 'error', 'preparation'];
+const views = ['editor', 'progress', 'report', 'history', 'error', 'preparation', 'billing'];
 
 function toast(message) {
   clearTimeout(state.toastTimer);
@@ -29,7 +30,7 @@ async function api(path, options = {}) {
     if (options.method && options.method !== 'GET') headers['X-CSRF-Token'] = state.config?.csrf || '';
     const response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) { const error = new Error(data.error || '请求未完成，请稍后再试。'); error.status = response.status; throw error; }
+    if (!response.ok) { const error = new Error(data.error || '请求未完成，请稍后再试。'); error.status = response.status; error.code = data.code; throw error; }
     return data;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('请求超时，请检查网络后重试。');
@@ -51,11 +52,29 @@ async function bootstrap() {
     $('#privacy-provider').textContent = provider;
     $('#privacy-region').textContent = region;
     $('#privacy-retention').textContent = retention;
+    updateBillingHints();
   } catch (error) {
     $('#service-notice').textContent = `${error.message} 刷新页面可重新连接；示例报告仍可尝试打开。`;
     $('#service-notice').hidden = false;
     $('#submit-diagnosis').disabled = true;
   }
+}
+
+function updateBillingHints() {
+  if (!state.config) return;
+  $('#account-nav').textContent = state.config.account ? '账号与次数' : '登录 / 次数';
+  $('#diagnosis-cost').hidden = !state.config.billing_enabled;
+  $('#diagnosis-cost').innerHTML = '<span>本次诊断预占 1 次，生成成功后扣除；最终失败自动退回。</span><a href="'+(state.config.account ? '#account' : '#account/login?next=start')+'">'+(state.config.account ? '查看次数 / 购买' : '登录后使用')+' ↗</a>';
+}
+
+async function accountChanged(mode) {
+  preparationUI.stop();
+  if (mode === 'logout' || state.config?.account) preparationUI.drafts.clear();
+  preparationUI.data = null;
+  preparationUI.root.innerHTML = ''; state.diagnosis = null; state.recovery = null;
+  $('#report-root').innerHTML = ''; $('#history-list').innerHTML = ''; $('#progress-recovery').innerHTML = '';
+  if (mode === 'logout') { $('#resume').value = ''; $('#jd').value = ''; $('#pdf-extracted').value = ''; $('#pdf-review').hidden = true; $('#consent').checked = false; updateCounts(); }
+  await bootstrap();
 }
 
 function showView(name, nav = '') {
@@ -70,6 +89,7 @@ async function getExample() { if (!state.example) state.example = await api('/ap
 
 async function route() {
   preparationUI.stop();
+  billingUI.stop();
   const epoch = ++state.epoch;
   clearTimeout(state.pollTimer);
   showError($('#poll-error'));
@@ -77,6 +97,7 @@ async function route() {
   if (epoch !== state.epoch) return;
   const routeName = location.hash.slice(1) || 'start';
   try {
+    if (/^(account|plans|order|admin)(\/|\?|$)/.test(routeName)) { showView('billing', 'account'); await billingUI.open(routeName); return; }
     if (routeName === 'start') { showView('editor', 'start'); document.title = '岗位罗盘 · 让经历与机会对齐'; return; }
     if (routeName === 'example') {
       const example = await getExample(); if (epoch !== state.epoch) return;
@@ -333,7 +354,7 @@ $('#diagnosis-form').addEventListener('submit', async (event) => {
     if (result.duplicate) toast('这份材料已有对应任务，已为你打开。');
     location.hash = `report/${result.id}`;
     window.scrollTo({ top: 0, behavior: motion() });
-  } catch (error) { showError($('#form-error'), error.message); }
+  } catch (error) { showError($('#form-error'), error.message); if (error.status === 402) { $('#form-error').innerHTML = `${escapeHTML(error.message)} <a class="text-link" href="${error.code === 'account_required' ? '#account/login?next=start' : '#account'}">前往账号页 ↗</a>（填写的材料会保留在当前页面）`; } }
   finally { state.submitting = false; $('#submit-diagnosis').disabled = !state.config?.ready; $('#submit-diagnosis span:first-child').textContent = '开始逐项诊断'; }
 });
 
@@ -381,6 +402,7 @@ for (const dialog of $$('dialog')) dialog.addEventListener('click', (event) => {
 });
 window.addEventListener('hashchange', () => { route(); window.scrollTo({ top: 0, behavior: 'instant' }); });
 const preparationUI = new PreparationUI({ api, toast, downloadBlob, dateText, config: () => state.config, onError: pageError });
+const billingUI = new BillingUI({ toast, downloadBlob, dateText, config: () => state.config, refreshConfig:bootstrap, onAuth:accountChanged, onOverview: overview => { if (state.config) { state.config.account = overview.account; state.config.billing_enabled = overview.enabled; updateBillingHints(); } } });
 const bootReady = bootstrap();
 updateCounts();
 route();

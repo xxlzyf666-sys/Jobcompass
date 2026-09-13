@@ -63,10 +63,12 @@ func testApp(t *testing.T, provider Provider) *App {
 }
 
 type browser struct {
-	cookie *http.Cookie
-	csrf   string
-	app    *App
-	ip     string
+	cookie      *http.Cookie
+	csrf        string
+	app         *App
+	ip          string
+	adminCookie *http.Cookie
+	adminCSRF   string
 }
 
 func newBrowser(t *testing.T, a *App) *browser {
@@ -104,9 +106,15 @@ func (b *browser) request(method, target string, body any) *httptest.ResponseRec
 	if b.cookie != nil {
 		r.AddCookie(b.cookie)
 	}
+	if b.adminCookie != nil {
+		r.AddCookie(b.adminCookie)
+	}
 	if method != "GET" {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("X-CSRF-Token", b.csrf)
+		if strings.HasPrefix(target, "/api/admin/") && target != "/api/admin/login" {
+			r.Header.Set("X-CSRF-Token", b.adminCSRF)
+		}
 		r.Header.Set("Origin", b.app.config.Origin)
 	}
 	w := httptest.NewRecorder()
