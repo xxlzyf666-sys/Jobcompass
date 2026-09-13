@@ -1,9 +1,10 @@
+const { PreparationUI } = await import(document.querySelector('#preparation-module').href);
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHTML = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const labels = { supported: '已有依据', needs_detail: '待补充', not_found: '未体现', pending: '排队中', running: '分析中', done: '已完成', failed: '未完成' };
 const state = { config: null, example: null, diagnosis: null, recovery: null, filter: 'all', epoch: 0, pollTimer: null, toastTimer: null, pdfEpoch: 0, pdfTask: null, submitting: false, deletingID: null };
-const views = ['editor', 'progress', 'report', 'history', 'error'];
+const views = ['editor', 'progress', 'report', 'history', 'error', 'preparation'];
 
 function toast(message) {
   clearTimeout(state.toastTimer);
@@ -46,7 +47,7 @@ async function bootstrap() {
     $('#submit-diagnosis').disabled = !ready;
     $('#submit-diagnosis span:first-child').textContent = ready ? '开始逐项诊断' : '真实诊断暂未开放';
     const retention = hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`;
-    $('#retention-note').textContent = `文字与报告保留 ${retention}，可随时删除。引用会核对来源，模型解读仍需你确认。`;
+    $('#retention-note').textContent = `材料、报告及求职准备资料保留 ${retention}，可随时删除。引用会核对来源，模型解读仍需你确认。`;
     $('#privacy-provider').textContent = provider;
     $('#privacy-region').textContent = region;
     $('#privacy-retention').textContent = retention;
@@ -67,6 +68,7 @@ function showView(name, nav = '') {
 async function getExample() { if (!state.example) state.example = await api('/api/example'); return state.example; }
 
 async function route() {
+  preparationUI.stop();
   const epoch = ++state.epoch;
   clearTimeout(state.pollTimer);
   showError($('#poll-error'));
@@ -83,6 +85,14 @@ async function route() {
       return;
     }
     if (routeName === 'history') { showView('history', 'history'); document.title = '我的报告 · 岗位罗盘'; await loadHistory(epoch); return; }
+    const preparationMatch = /^prepare\/(example|[a-f0-9]{32})\/(refine|versions|interview)$/.exec(routeName);
+    if (preparationMatch) {
+      state.diagnosis = { id: preparationMatch[1] };
+      showView('preparation', preparationMatch[1] === 'example' ? 'example' : 'history');
+      document.title = '求职准备 · 岗位罗盘';
+      await preparationUI.open(preparationMatch[1], preparationMatch[2]);
+      return;
+    }
     const match = /^report\/([a-f0-9]{32})$/.exec(routeName);
     if (match) {
       state.diagnosis = { id: match[1], status: 'pending' };
@@ -144,6 +154,7 @@ function renderReport() {
     <div class="report-toolbar"><a class="text-link muted" href="${example ? '#start' : '#history'}">← ${example ? '返回开始诊断' : '我的报告'}</a><div class="toolbar-actions"><button type="button" class="button secondary small" data-export-md>导出 Markdown ↓</button><button type="button" class="button primary small" data-export-pdf>保存 PDF ↗</button></div></div>
     ${example ? '<div class="example-banner"><span>这是一份固定的虚构示例，用于展示报告结构。</span><a href="#start" class="text-link">诊断我的简历 ↗</a></div>' : ''}
     <div class="report-heading"><div><p class="eyebrow">岗位与经历 · 逐项对照</p><h1>${escapeHTML(report.title)}</h1><p class="report-summary">${escapeHTML(report.summary)}</p></div><div class="report-stamp">${example ? 'EXAMPLE / 固定示例' : dateText(diagnosis.created_at, true)}<br>${total} 项岗位要求<br>${escapeHTML(report.rubric_version)}</div></div>
+    <section class="preparation-cta"><div><h2>把诊断变成下一步行动</h2><p>回答追问、核对简历改写，保存岗位版本，再用你的项目练一轮面试。</p></div><a class="button primary" href="#prepare/${diagnosis.id}/refine">${example ? '查看求职准备示例' : '进入求职准备'} ↗</a></section>
     <div class="counts-bar" aria-label="证据分类统计"><div class="count-item"><span class="count-number">${report.counts.supported}</span><div class="count-text"><strong>已有依据</strong><p>有直接相关的经历</p></div></div><div class="count-item detail"><span class="count-number">${report.counts.needs_detail}</span><div class="count-text"><strong>待补充</strong><p>相关细节还需说明</p></div></div><div class="count-item missing"><span class="count-number">${report.counts.not_found}</span><div class="count-text"><strong>未体现</strong><p>原文未找到明确表述</p></div></div></div>
     <p class="evidence-note">这些数量描述本次材料的证据分布。未写出的经历，不代表你不具备这项能力。</p>
     <section aria-labelledby="evidence-title"><div class="evidence-section-heading"><h2 id="evidence-title">每项要求，找到它的依据</h2><div class="filter-bar" role="group" aria-label="按证据状态筛选"><button type="button" data-filter="all" aria-pressed="true">全部 ${total}</button><button type="button" data-filter="supported" aria-pressed="false">已有依据 ${report.counts.supported}</button><button type="button" data-filter="needs_detail" aria-pressed="false">待补充 ${report.counts.needs_detail}</button><button type="button" data-filter="not_found" aria-pressed="false">未体现 ${report.counts.not_found}</button></div></div><div id="evidence-cards"></div></section>
@@ -170,7 +181,7 @@ async function loadHistory(epoch = state.epoch) {
       $('#history-list').innerHTML = '<div class="empty-state"><span class="empty-symbol" aria-hidden="true">↗</span><h2>下一次对照，从这里开始</h2><p>当前浏览器还没有报告。准备好简历和岗位要求后，就可以开始。已有恢复码，也可以找回报告。</p><div class="empty-actions"><a class="button primary" href="#start">开始诊断 ↗</a><a class="button secondary" href="#example">先看完整示例</a></div></div>';
       return;
     }
-    $('#history-list').innerHTML = diagnoses.map((d) => `<article class="history-item"><div><h2>后端开发岗位诊断 <span class="requirement-id">${escapeHTML(d.id.slice(0, 6).toUpperCase())}</span></h2><p>${dateText(d.created_at, true)} 创建 · 保留至 ${dateText(d.expires_at)}</p></div><div class="history-item-actions"><span class="status-badge ${d.status === 'failed' ? 'needs_detail' : ''}">${escapeHTML(labels[d.status])}</span><a class="text-link" href="#report/${escapeHTML(d.id)}">${d.status === 'done' ? '查看报告' : '查看状态'} ↗</a><button type="button" class="text-link danger" data-delete-id="${escapeHTML(d.id)}">删除</button></div></article>`).join('');
+    $('#history-list').innerHTML = diagnoses.map((d) => `<article class="history-item"><div><h2>后端开发岗位诊断 <span class="requirement-id">${escapeHTML(d.id.slice(0, 6).toUpperCase())}</span></h2><p>${dateText(d.created_at, true)} 创建 · 保留至 ${dateText(d.expires_at)}</p></div><div class="history-item-actions"><span class="status-badge ${d.status === 'failed' ? 'needs_detail' : ''}">${escapeHTML(labels[d.status])}</span>${d.status === 'done' ? `<a class="text-link" href="#prepare/${escapeHTML(d.id)}/refine">求职准备 ↗</a>` : ''}<a class="text-link" href="#report/${escapeHTML(d.id)}">${d.status === 'done' ? '查看报告' : '查看状态'} ↗</a><button type="button" class="text-link danger" data-delete-id="${escapeHTML(d.id)}">删除</button></div></article>`).join('');
   } catch (error) { if (epoch === state.epoch) $('#history-list').innerHTML = `<div class="empty-state"><h2>报告列表暂时无法打开</h2><p>${escapeHTML(error.message)}</p><div class="empty-actions"><button class="button secondary" data-reload-history>重新加载</button></div></div>`; }
 }
 
@@ -343,6 +354,7 @@ $('#confirm-delete').addEventListener('click', async () => {
   $('#confirm-delete').disabled = true; showError($('#delete-error'));
   try {
     await api(`/api/diagnoses/${state.deletingID}`, { method: 'DELETE' });
+    preparationUI.forget(state.deletingID);
     if (state.recovery?.id === state.deletingID) state.recovery = null;
     $('#delete-dialog').close(); state.deletingID = null;
     clearTimeout(state.pollTimer); toast('材料与报告已删除，恢复码已失效。');
@@ -367,6 +379,7 @@ for (const dialog of $$('dialog')) dialog.addEventListener('click', (event) => {
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
 });
 window.addEventListener('hashchange', () => { route(); window.scrollTo({ top: 0, behavior: 'instant' }); });
+const preparationUI = new PreparationUI({ api, toast, downloadBlob, dateText, config: () => state.config, onError: pageError });
 const bootReady = bootstrap();
 updateCounts();
 route();

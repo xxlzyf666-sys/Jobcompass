@@ -1,6 +1,7 @@
 // Local integration-test fixture. This is not an AI model and is never used by default.
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { preparationFixture } from './preparation-fixture.mjs';
 if (!process.argv.includes('--test-only')) throw new Error('Run only for tests, with --test-only.');
 const fixture = JSON.parse(await readFile(new URL('../internal/app/example.json', import.meta.url), 'utf8'));
 const port = Number(process.env.JOBCOMPASS_MOCK_PORT || 9091);
@@ -18,10 +19,17 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/v1/messages') { res.writeHead(404); res.end(); return; }
   try {
     let raw = '';
-    for await (const chunk of req) { raw += chunk; if (raw.length > 200000) throw new Error('Request too large'); }
+    for await (const chunk of req) { raw += chunk; if (raw.length > 768000) throw new Error('Request too large'); }
     const request = JSON.parse(raw);
     const input = JSON.parse(request.messages[0].content);
-    if (request.model !== 'local-fixture-not-ai' || request.tool_choice?.name !== 'deliver_diagnosis') throw new Error('Invalid test protocol');
+    if (request.model !== 'local-fixture-not-ai' || !['deliver_diagnosis','deliver_preparation'].includes(request.tool_choice?.name)) throw new Error('Invalid test protocol');
+    if (request.tool_choice.name === 'deliver_preparation') {
+      const output = preparationFixture(input);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ model:'local-fixture-not-ai', stop_reason:'tool_use', usage:{input_tokens:0,output_tokens:0}, content:[{type:'tool_use',name:'deliver_preparation',input:output}] }));
+      return;
+    }
     const report = structuredClone(fixture.report);
     report.title = '本地联调样例 · Go 后端开发对照';
     report.summary = '本报告由本地固定测试响应生成，用于验证网站流程，不是真实 AI 诊断。' + report.summary;

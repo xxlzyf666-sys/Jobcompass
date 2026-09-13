@@ -40,3 +40,28 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   PRIMARY KEY(key,window_start)
 );
 INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
+CREATE TABLE IF NOT EXISTS preparations (
+  diagnosis_id TEXT PRIMARY KEY REFERENCES diagnoses(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  data_cipher BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS preparation_tasks (
+  id TEXT PRIMARY KEY,
+  diagnosis_id TEXT NOT NULL REFERENCES diagnoses(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','running','done','failed')),
+  input_cipher BLOB,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL,
+  lease_until INTEGER NOT NULL DEFAULT 0,
+  worker_token TEXT NOT NULL DEFAULT '',
+  error_message TEXT NOT NULL DEFAULT '',
+  tokens_in INTEGER NOT NULL DEFAULT 0,
+  tokens_out INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS preparation_queue ON preparation_tasks(status,next_attempt_at);
+CREATE INDEX IF NOT EXISTS preparation_parent ON preparation_tasks(diagnosis_id);
+INSERT OR IGNORE INTO schema_migrations(version) VALUES (2);

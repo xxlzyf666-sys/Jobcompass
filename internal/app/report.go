@@ -10,7 +10,7 @@ import (
 )
 
 const rubricVersion = "backend-evidence-v1.0"
-const consentVersion = "2026-09-12"
+const consentVersion = "2026-09-13"
 
 type Input struct {
 	Resume string `json:"resume"`

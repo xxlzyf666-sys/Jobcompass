@@ -24,6 +24,7 @@ var embedded embed.FS
 type runningJob struct {
 	cancel  context.CancelFunc
 	expires int64
+	parent  string
 }
 type App struct {
 	config   Config
@@ -58,7 +59,7 @@ func New(config Config, provider Provider) (*App, error) {
 		return nil, err
 	}
 	// Content versions prevent a newly deployed page from using cached old UI code.
-	for _, name := range []string{"app.css", "app.js"} {
+	for _, name := range []string{"app.css", "app.js", "preparation.css", "preparation.js"} {
 		asset, readErr := embedded.ReadFile("web/" + name)
 		if readErr != nil {
 			store.Close()
@@ -147,6 +148,9 @@ func (a *App) routes() {
 	a.mux.HandleFunc("DELETE /api/diagnoses/{id}", a.deleteDiagnosis)
 	a.mux.HandleFunc("GET /api/diagnoses/{id}/export", a.exportDiagnosis)
 	a.mux.HandleFunc("POST /api/recover", a.recoverDiagnosis)
+	a.mux.HandleFunc("GET /api/diagnoses/{id}/preparation", a.getPreparation)
+	a.mux.HandleFunc("POST /api/diagnoses/{id}/preparation", a.changePreparation)
+	a.mux.HandleFunc("GET /api/diagnoses/{id}/versions/{version}/export", a.exportResume)
 }
 
 func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) {

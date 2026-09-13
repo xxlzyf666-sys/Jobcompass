@@ -19,6 +19,7 @@ type Config struct {
 	Production                                                              bool
 	Key                                                                     []byte
 	Workers, QueueLimit, IPQuota, SessionQuota                              int
+	PreparationIPQuota, PreparationSessionQuota                             int
 	Retention, RequestTimeout                                               time.Duration
 }
 
@@ -70,6 +71,7 @@ func LoadConfig() (Config, error) {
 	}{
 		{"WORKER_COUNT", &c.Workers, 2, 1, 4}, {"QUEUE_LIMIT", &c.QueueLimit, 20, 1, 100},
 		{"DIAGNOSES_PER_IP_HOUR", &c.IPQuota, 3, 1, 1000}, {"DIAGNOSES_PER_SESSION_DAY", &c.SessionQuota, 5, 1, 1000},
+		{"PREPARATION_ACTIONS_PER_IP_HOUR", &c.PreparationIPQuota, 60, 1, 1000}, {"PREPARATION_ACTIONS_PER_SESSION_DAY", &c.PreparationSessionQuota, 120, 1, 2000},
 	} {
 		*setting.target, err = envInt(setting.name, setting.fallback, setting.min, setting.max)
 		if err != nil {

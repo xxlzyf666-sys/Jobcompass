@@ -45,24 +45,37 @@ func (p *ClaudeProvider) Ready() bool { return p.config.APIKey != "" && p.config
 
 func (p *ClaudeProvider) Diagnose(ctx context.Context, input Input) (Report, Usage, error) {
 	var report Report
+	model, usage, err := p.callTool(ctx, input, diagnosisPrompt, "deliver_diagnosis", reportSchema(), 6000, &report)
+	if err != nil {
+		return report, usage, err
+	}
+	if err = validateReport(&report, input); err != nil {
+		return report, usage, &ProviderError{"ungrounded", "本次结果有引文或结构未通过核对，已停止展示。请检查材料后重试。", false}
+	}
+	report.Model = model
+	return report, usage, nil
+}
+
+func (p *ClaudeProvider) callTool(ctx context.Context, input any, systemPrompt, toolName string, schema any, maxTokens int, output any) (string, Usage, error) {
+	var model string
 	var usage Usage
 	if !p.Ready() {
-		return report, usage, &ProviderError{"unavailable", "真实诊断暂未开放，可先查看示例报告。", false}
+		return model, usage, &ProviderError{"unavailable", "真实诊断暂未开放，可先查看示例报告。", false}
 	}
 	material, _ := json.Marshal(input)
 	body, err := json.Marshal(map[string]any{
-		"model": p.config.Model, "max_tokens": 6000,
-		"system":      diagnosisPrompt,
+		"model": p.config.Model, "max_tokens": maxTokens,
+		"system":      systemPrompt,
 		"messages":    []any{map[string]any{"role": "user", "content": string(material)}},
-		"tools":       []any{map[string]any{"name": "deliver_diagnosis", "description": "交付有原文依据的岗位对照及补充问题。", "input_schema": reportSchema()}},
-		"tool_choice": map[string]string{"type": "tool", "name": "deliver_diagnosis"},
+		"tools":       []any{map[string]any{"name": toolName, "description": "交付有原文依据的岗位对照及补充问题。", "input_schema": schema}},
+		"tool_choice": map[string]string{"type": "tool", "name": toolName},
 	})
 	if err != nil {
-		return report, usage, err
+		return model, usage, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return report, usage, err
+		return model, usage, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.config.APIKey)
@@ -70,25 +83,25 @@ func (p *ClaudeProvider) Diagnose(ctx context.Context, input Input) (Report, Usa
 	resp, err := p.client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return report, usage, ctx.Err()
+			return model, usage, ctx.Err()
 		}
-		return report, usage, &ProviderError{"network", "分析服务暂时未能连接，请稍后重新提交。", true}
+		return model, usage, &ProviderError{"network", "分析服务暂时未能连接，请稍后重新提交。", true}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		// Upstream bodies can repeat input, credentials, or proxy details. Never surface or log them.
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-			return report, usage, &ProviderError{"upstream_temporary", "分析服务繁忙，请稍后重新提交。", true}
+			return model, usage, &ProviderError{"upstream_temporary", "分析服务繁忙，请稍后重新提交。", true}
 		}
-		return report, usage, &ProviderError{"upstream_rejected", "分析服务暂时无法处理这次请求，请稍后再试。", false}
+		return model, usage, &ProviderError{"upstream_rejected", "分析服务暂时无法处理这次请求，请稍后再试。", false}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 768*1024+1))
 	if err != nil {
-		return report, usage, &ProviderError{"response_read", "分析结果未完整返回，请稍后重试。", true}
+		return model, usage, &ProviderError{"response_read", "分析结果未完整返回，请稍后重试。", true}
 	}
 	if len(data) > 768*1024 {
-		return report, usage, &ProviderError{"response_size", "分析结果超过长度限制，请精简材料后重试。", false}
+		return model, usage, &ProviderError{"response_size", "分析结果超过长度限制，请精简材料后重试。", false}
 	}
 	var envelope struct {
 		Model      string `json:"model"`
@@ -101,40 +114,37 @@ func (p *ClaudeProvider) Diagnose(ctx context.Context, input Input) (Report, Usa
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
-		return report, usage, &ProviderError{"invalid_response", "分析结果格式异常，请稍后重试。", false}
+		return model, usage, &ProviderError{"invalid_response", "分析结果格式异常，请稍后重试。", false}
 	}
 	usage = envelope.Usage
 	if envelope.StopReason == "refusal" {
-		return report, usage, &ProviderError{"refusal", "模型未能处理这份材料，请移除与求职无关的内容后重试。", false}
+		return model, usage, &ProviderError{"refusal", "模型未能处理这份材料，请移除与求职无关的内容后重试。", false}
 	}
 	if envelope.StopReason == "max_tokens" {
-		return report, usage, &ProviderError{"truncated", "分析结果未完成，请缩短材料后重试。", false}
+		return model, usage, &ProviderError{"truncated", "分析结果未完成，请缩短材料后重试。", false}
 	}
 	var toolInput json.RawMessage
 	for _, block := range envelope.Content {
-		if block.Type == "tool_use" && block.Name == "deliver_diagnosis" {
+		if block.Type == "tool_use" && block.Name == toolName {
 			if toolInput != nil {
-				return report, usage, &ProviderError{"duplicate_output", "分析结果格式异常，请重新提交。", false}
+				return model, usage, &ProviderError{"duplicate_output", "分析结果格式异常，请重新提交。", false}
 			}
 			toolInput = block.Input
 		}
 	}
 	if toolInput == nil {
-		return report, usage, &ProviderError{"missing_output", "模型没有生成完整的对照结果，请重新提交。", false}
+		return model, usage, &ProviderError{"missing_output", "模型没有生成完整的对照结果，请重新提交。", false}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(toolInput))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&report); err != nil {
-		return report, usage, &ProviderError{"invalid_schema", "分析结果结构不完整，请重新提交。", false}
+	if err := decoder.Decode(output); err != nil {
+		return model, usage, &ProviderError{"invalid_schema", "分析结果结构不完整，请重新提交。", false}
 	}
-	if err := validateReport(&report, input); err != nil {
-		return report, usage, &ProviderError{"ungrounded", "本次结果有引文或结构未通过核对，已停止展示。请检查材料后重试。", false}
-	}
-	report.Model = p.config.Model
+	model = p.config.Model
 	if envelope.Model != "" && len(envelope.Model) < 120 {
-		report.Model = envelope.Model
+		model = envelope.Model
 	}
-	return report, usage, nil
+	return model, usage, nil
 }
 
 func providerFailure(err error) (message, kind string, retryable bool) {

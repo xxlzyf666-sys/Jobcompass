@@ -13,6 +13,7 @@ func (a *App) startWorkers(ctx context.Context) *sync.WaitGroup {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			preparationFirst := false
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
 			for {
@@ -21,8 +22,16 @@ func (a *App) startWorkers(ctx context.Context) *sync.WaitGroup {
 					return
 				default:
 				}
-				if a.provider.Ready() && a.processOne(ctx) {
-					continue
+				if a.provider.Ready() {
+					// Both queues share the same worker budget and alternate priority.
+					preparationFirst = !preparationFirst
+					if preparationFirst {
+						if a.processPreparation(ctx) || a.processOne(ctx) {
+							continue
+						}
+					} else if a.processOne(ctx) || a.processPreparation(ctx) {
+						continue
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -105,9 +114,58 @@ func (a *App) processOne(ctx context.Context) bool {
 func (a *App) cancelJob(id string) {
 	a.jobsMu.Lock()
 	defer a.jobsMu.Unlock()
-	if job, ok := a.jobs[id]; ok {
-		job.cancel()
+	for key, job := range a.jobs {
+		if key == id || job.parent == id {
+			job.cancel()
+		}
 	}
+}
+
+func (a *App) processPreparation(ctx context.Context) bool {
+	provider, ok := a.provider.(PreparationProvider)
+	if !ok {
+		return false
+	}
+	task, err := a.store.ClaimPreparation(ctx, time.Now(), a.config.RequestTimeout+30*time.Second)
+	if err != nil {
+		if task != nil {
+			_ = a.store.FailPreparation(ctx, task, "材料读取失败，请重新开始。", false, Usage{}, time.Now())
+		}
+		if ctx.Err() == nil {
+			slog.Error("preparation task claim failed")
+		}
+		return false
+	}
+	if task == nil {
+		return false
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, a.config.RequestTimeout)
+	a.jobsMu.Lock()
+	a.jobs[task.ID] = runningJob{cancel: cancel, expires: task.ExpiresAt, parent: task.Parent}
+	a.jobsMu.Unlock()
+	defer func() { cancel(); a.jobsMu.Lock(); delete(a.jobs, task.ID); a.jobsMu.Unlock() }()
+	var exists int
+	if err = a.store.db.QueryRowContext(requestCtx, `SELECT COUNT(*) FROM preparation_tasks t JOIN diagnoses d ON d.id=t.diagnosis_id WHERE t.id=? AND t.status='running' AND t.worker_token=? AND d.expires_at>?`, task.ID, task.Token, time.Now().Unix()).Scan(&exists); err != nil || exists == 0 {
+		return true
+	}
+	output, usage, err := provider.Prepare(requestCtx, task.Input)
+	if ctx.Err() != nil {
+		return false
+	}
+	if err == nil {
+		err = validatePreparationOutput(&output, task.Input)
+	}
+	if err == nil {
+		err = a.store.CompletePreparation(ctx, task, output, usage, time.Now())
+	}
+	if err != nil {
+		message, kind, retry := providerFailure(err)
+		if saveErr := a.store.FailPreparation(ctx, task, message, retry, usage, time.Now()); saveErr != nil {
+			slog.Error("preparation failure write failed")
+		}
+		slog.Warn("preparation attempt failed", "kind", kind, "attempt", task.Attempts)
+	}
+	return true
 }
 func (a *App) cancelExpired(now time.Time) {
 	a.jobsMu.Lock()

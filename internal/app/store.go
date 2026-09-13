@@ -193,7 +193,7 @@ func (s *Store) Create(ctx context.Context, owner, ip string, input Input, confi
 		return "", "", false, err
 	}
 	var active int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM diagnoses WHERE status IN ('pending','running') AND expires_at>?", now.Unix()).Scan(&active); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM diagnoses WHERE status IN ('pending','running') AND expires_at>?) + (SELECT COUNT(*) FROM preparation_tasks t JOIN diagnoses d ON d.id=t.diagnosis_id WHERE t.status IN ('pending','running') AND d.expires_at>?)", now.Unix(), now.Unix()).Scan(&active); err != nil {
 		return "", "", false, err
 	}
 	if active >= config.QueueLimit {
@@ -366,6 +366,9 @@ func (s *Store) Fail(ctx context.Context, job *Job, message string, retryable bo
 
 func (s *Store) RecoverLeases(ctx context.Context, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE diagnoses SET status=CASE WHEN attempts<3 THEN 'pending' ELSE 'failed' END,error_message=CASE WHEN attempts<3 THEN '' ELSE '分析多次中断，请重新提交。' END,worker_token='',lease_until=0,next_attempt_at=?,updated_at=? WHERE status='running' AND lease_until<=? AND expires_at>?`, now.Unix(), now.Unix(), now.Unix(), now.Unix())
+	if err == nil {
+		_, err = s.db.ExecContext(ctx, `UPDATE preparation_tasks SET status=CASE WHEN attempts<3 THEN 'pending' ELSE 'failed' END,error_message=CASE WHEN attempts<3 THEN '' ELSE '生成多次中断，可以重试；已保存的内容仍然保留。' END,worker_token='',lease_until=0,next_attempt_at=?,updated_at=? WHERE status='running' AND lease_until<=?`, now.Unix(), now.Unix(), now.Unix())
+	}
 	return err
 }
 
