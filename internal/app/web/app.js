@@ -42,8 +42,8 @@ async function bootstrap() {
   try {
     state.config = await api('/api/bootstrap');
     const { ready, provider, region, retention_hours: hours } = state.config;
-    $('#service-notice').textContent = ready ? `分析服务：${provider} · 每条引文都会核对来源，结果仍需本人确认。` : '目前为体验预览：可以查看完整示例，或体验 PDF 文字提取。真实诊断暂未开放。';
-    $('#service-notice').classList.toggle('ready', ready);
+    $('#service-notice').textContent = ready ? '' : '目前为体验预览：可以查看完整示例，或体验 PDF 文字提取。真实诊断暂未开放。';
+    $('#service-notice').hidden = ready;
     $('#submit-diagnosis').disabled = !ready;
     $('#submit-diagnosis span:first-child').textContent = ready ? '开始逐项诊断' : '真实诊断暂未开放';
     const retention = hours % 24 === 0 ? `${hours / 24} 天` : `${hours} 小时`;
@@ -53,6 +53,7 @@ async function bootstrap() {
     $('#privacy-retention').textContent = retention;
   } catch (error) {
     $('#service-notice').textContent = `${error.message} 刷新页面可重新连接；示例报告仍可尝试打开。`;
+    $('#service-notice').hidden = false;
     $('#submit-diagnosis').disabled = true;
   }
 }
