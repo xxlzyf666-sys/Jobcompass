@@ -104,6 +104,9 @@ func (s *Store) RegisterAccount(ctx context.Context, oldToken, username, passwor
 	if err != nil {
 		return
 	}
+	if err = s.grantWelcomeCredits(ctx, tx, owner, now); err != nil {
+		return
+	}
 	token, err = s.accountSession(ctx, tx, oldToken, owner, claimReports, now)
 	if err != nil {
 		return

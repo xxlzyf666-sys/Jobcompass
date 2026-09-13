@@ -41,7 +41,7 @@ export class PreparationUI {
   cost(kind) {
     if (!this.paid) return '';
     const text = {refine:'生成追问使用 1 轮精修，包含一次回答后的改写。重新生成追问开启新一轮。',tailor:'每次按岗位生成建议使用 1 次岗位适配；手动编辑、采纳和导出不扣次。',interview:'首题生成后使用 1 场面试，包含最多 5 题、反馈及复盘。提前结束仍计 1 场。'}[kind];
-    return `<div class="billing-cost prep-billing-cost"><span>${text} 最终生成失败退回次数，手动重试会重新预占。</span><a href="${this.config()?.account ? '#account' : `#account/login?next=${encodeURIComponent(`prepare/${this.id}/${this.tab}`)}`}">查看次数 / 登录 ↗</a></div>`;
+    return `<div class="billing-cost prep-billing-cost"><span>${text} 优先使用免费体验次数，最终生成失败退回次数，手动重试会重新预占。</span><a href="${this.config()?.account ? '#account' : `#account/login?next=${encodeURIComponent(`prepare/${this.id}/${this.tab}`)}`}">查看次数 / 登录 ↗</a></div>`;
   }
   url(tab) { return `#prepare/${this.id}/${tab}`; }
   async open(id, tab) {

@@ -62,9 +62,10 @@ async function bootstrap() {
 
 function updateBillingHints() {
   if (!state.config) return;
-  $('#account-nav').textContent = state.config.account ? '账号与次数' : '登录 / 次数';
+  $('#account-nav').textContent = state.config.account ? '账号与次数' : '登录 / 免费体验';
+  $('#welcome-offer').hidden = Boolean(state.config.account);
   $('#diagnosis-cost').hidden = !state.config.billing_enabled;
-  $('#diagnosis-cost').innerHTML = '<span>本次诊断预占 1 次，生成成功后扣除；最终失败自动退回。</span><a href="'+(state.config.account ? '#account' : '#account/login?next=start')+'">'+(state.config.account ? '查看次数 / 购买' : '登录后使用')+' ↗</a>';
+  $('#diagnosis-cost').innerHTML = '<span>'+(state.config.account ? '本次诊断预占 1 次，优先使用免费体验次数；生成成功后扣除，最终失败自动退回。' : '新账号注册可免费诊断 1 次，生成最终失败会退回体验次数。')+'</span><a href="'+(state.config.account ? '#account' : '#account/register?next=start')+'">'+(state.config.account ? '查看次数 / 购买' : '注册免费体验')+' ↗</a>';
 }
 
 async function accountChanged(mode) {

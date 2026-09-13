@@ -93,6 +93,10 @@ func OpenStore(directory string, key []byte) (*Store, error) {
 		db.Close()
 		return nil, errors.New("database encryption key does not match or database is invalid")
 	}
+	if err = s.migrateWelcomeCredits(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate welcome credits: %w", err)
+	}
 	return s, nil
 }
 

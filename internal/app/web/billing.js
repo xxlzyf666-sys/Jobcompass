@@ -2,7 +2,7 @@ const h = (value = '') => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&a
 const kinds = { diagnosis:'逐项诊断', refine:'简历精修', tailor:'岗位适配', interview:'文字面试' };
 const units = { diagnosis:'次', refine:'轮', tailor:'次', interview:'场' };
 const statuses = { awaiting_payment:'待付款', submitted:'待人工核款', paid:'已发放', rejected:'需补充核对', cancelled:'已取消', expired:'已过期', refunded:'已退款' };
-const eventNames = { granted:'到账发放', reserved:'生成中预占', consumed:'生成完成', released:'退回次数', revoked:'退款收回' };
+const eventNames = { welcome_granted:'注册赠送', granted:'到账发放', reserved:'生成中预占', consumed:'生成完成', released:'退回次数', revoked:'退款收回' };
 const money = value => `¥${(Number(value || 0) / 100).toFixed(2)}`;
 function cents(value) {
   if (!/^\d{1,4}(\.\d{1,2})?$/.test(value)) throw new Error('金额请填写最多两位小数的人民币数值。');
@@ -11,6 +11,7 @@ function cents(value) {
 }
 const included = credits => `<ul class="billing-included">${Object.keys(kinds).map(k => `<li><span>${kinds[k]}</span><strong>${credits?.[k] || 0} ${units[k]}</strong></li>`).join('')}</ul>`;
 const rules = `<section class="billing-card billing-rules"><h2>购买前，请先了解这些规则</h2><ul>
+  <li>新账号注册即赠诊断 1 次、精修 1 轮、岗位适配 1 次、文字面试 1 场，无需先付款。每个账号仅赠送一次，优先使用赠送次数，用完后再使用已购次数。赠送次数不能兑换现金或申请退款。</li>
   <li>使用个人收款码，付款后提交完整交易单号，由运营者核实到账后发放。点击“我已付款”不会立即获得次数；具体核款时间和联系方式以订单为准。</li>
   <li>诊断：每份完整报告 1 次。精修：生成一轮追问计 1 轮，包含一次基于回答的改写；重新生成追问开启新一轮。岗位适配：每次生成修改建议计 1 次。</li>
   <li>文字面试：每场 3 或 5 题，首题生成后计 1 场，包含后续追问、逐题反馈和复盘。提前结束或放弃已开始的练习，仍计 1 场。</li>
@@ -125,14 +126,14 @@ export class BillingUI {
     const next = this.params.get('next') || (this.route.startsWith('order/') ? this.route : 'account');
     this.authNext = /^(account|plans|start|order\/[a-f0-9]{32}|prepare\/[a-f0-9]{32}\/(refine|versions|interview))$/.test(next) ? next : 'account';
     const suffix = `?next=${encodeURIComponent(this.authNext)}`;
-    this.shell(`<div class="billing-auth">${this.heading(title, resetting ? '账号恢复码以 JCA- 开头，与报告恢复码不同。重设后旧密码、旧恢复码和其他登录会话都会失效。' : '购买次数与订单保存在账号里，换浏览器后登录即可继续使用。')}
+    this.shell(`<div class="billing-auth">${this.heading(title, resetting ? '账号恢复码以 JCA- 开头，与报告恢复码不同。重设后旧密码、旧恢复码和其他登录会话都会失效。' : creating ? '注册即赠诊断 1 次、简历精修 1 轮、岗位适配 1 次、文字面试 1 场，无需付款即可体验。' : '体验次数、购买次数与订单保存在账号里，换浏览器后登录即可继续使用。')}
       <section class="billing-card"><form class="billing-form" data-form="auth"><fieldset><input type="hidden" name="mode" value="${mode}">
       <label class="billing-field">账号名<input name="username" required pattern="[A-Za-z0-9][A-Za-z0-9_]{3,31}" minlength="4" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"><small>4—32 位字母、数字或下划线，不区分大小写。</small></label>
       ${resetting ? '<label class="billing-field">账号恢复码<input name="recovery_code" required minlength="52" maxlength="60" placeholder="JCA-…" autocomplete="off" spellcheck="false"></label>' : ''}
       <label class="billing-field">${resetting ? '新密码' : '密码'}<input name="password" type="password" required minlength="10" maxlength="128" autocomplete="${creating || resetting ? 'new-password' : 'current-password'}"><small>至少 10 个字符，请使用独立的长密码。</small></label>
       ${creating || resetting ? '<label class="billing-field">再次输入密码<input name="repeat" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label>' : ''}
       ${!resetting && !this.overview?.account ? '<label class="billing-check"><input type="checkbox" name="claim_reports" checked><span>将当前匿名浏览器可访问的报告加入这个账号。</span></label>' : ''}
-      ${creating ? '<p class="billing-caption">创建后会显示一次账号恢复码，请保存到安全的位置。没有绑定手机号或邮箱；忘记密码时需要恢复码。</p>' : ''}
+      ${creating ? '<p class="billing-caption">每个账号仅赠送一次；精修包含追问和一次改写，面试包含最多 5 题及复盘。创建后请保存账号恢复码；忘记密码时需要它。</p>' : ''}
       <button type="submit" class="button primary full-width">${title} ↗</button></fieldset></form>
       <div class="billing-actions">${!creating ? `<a class="text-link" href="#account/register${suffix}">创建账号</a>` : `<a class="text-link" href="#account/login${suffix}">已有账号，登录</a>`}${!resetting ? `<a class="text-link muted" href="#account/reset${suffix}">忘记密码</a>` : `<a class="text-link" href="#account/login${suffix}">返回登录</a>`}</div></section><p class="billing-help">账号恢复码只能由本人保管。报告恢复码仅用于恢复报告，不授予账号或购买次数。</p></div>`, title);
   }
@@ -144,15 +145,17 @@ export class BillingUI {
     const o = this.overview;
     this.shell(`${this.heading(h(o.account.username), '次数绑定当前账号。材料到期不会删除购买记录；换设备后使用账号密码登录。', '<button class="text-link muted" data-billing="logout">退出账号</button>')}${this.tabs()}${this.recoveryCard()}
       ${!o.enabled ? '<p class="billing-note">目前暂未开放购买，生成沿用当前体验规则。已有订单仍可查询、核款及申请退款。</p>' : ''}
-      <div class="billing-credit-grid">${Object.keys(kinds).map(k => { const b = o.wallet[k]; return `<article class="billing-credit"><h2>${kinds[k]}</h2><strong>${b.available}</strong><small>${units[k]}可用</small><p>预占 ${b.reserved} · 已用 ${b.used}${b.on_hold ? ` · 退款暂停 ${b.on_hold}` : ''}</p></article>`; }).join('')}</div>
+      ${o.account.welcome_granted ? '<aside class="billing-note"><strong>新用户体验已赠送</strong><p>诊断、精修、岗位适配、文字面试各一次，优先使用赠送次数。每个账号仅领取一次，重新登录不会重置；最终生成失败会退回对应次数。</p></aside>' : ''}
+      <div class="billing-credit-grid">${Object.keys(kinds).map(k => { const b = o.wallet[k], trial = b.trial_available || 0; return `<article class="billing-credit"><h2>${kinds[k]}</h2><strong>${b.available}</strong><small>${units[k]}可用</small><p class="billing-credit-sources"><span>免费体验 ${trial}</span><span>已购 ${b.available - trial}</span></p><p>预占 ${b.reserved} · 已用 ${b.used}${b.on_hold ? ` · 退款暂停 ${b.on_hold}` : ''}</p></article>`; }).join('')}</div>
       <div class="billing-actions"><a class="button primary" href="#plans">查看套餐与规则 ↗</a><a class="button secondary" href="#${h(this.authNext && this.authNext !== 'account' ? this.authNext : 'start')}">继续使用</a></div>
       <section class="billing-card billing-details"><h2>我的订单</h2>${this.orderTable(orders)}${this.pager(orders, 'account')}</section>
-      <details class="billing-card billing-details"><summary>最近的次数记录 · ${o.events.length} 条</summary>${o.events.length ? `<div class="billing-table-wrap"><table class="billing-table"><thead><tr><th>时间</th><th>功能</th><th>变动</th><th>订单</th></tr></thead><tbody>${o.events.map(e => `<tr><td>${h(this.dateText(e.created_at, true))}</td><td>${kinds[e.kind]}</td><td>${eventNames[e.event] || h(e.event)} · ${e.units}</td><td><a href="#order/${h(e.order_id)}">${h(e.order_id.slice(0,8))}</a></td></tr>`).join('')}</tbody></table></div>` : '<p class="billing-empty">还没有次数变动。</p>'}</details>
+      <details class="billing-card billing-details"><summary>最近的次数记录 · ${o.events.length} 条</summary>${o.events.length ? `<div class="billing-table-wrap"><table class="billing-table"><thead><tr><th>时间</th><th>功能</th><th>变动</th><th>来源</th></tr></thead><tbody>${o.events.map(e => `<tr><td>${h(this.dateText(e.created_at, true))}</td><td>${kinds[e.kind]}</td><td>${eventNames[e.event] || h(e.event)} · ${e.units}</td><td>${e.order_id ? `<a href="#order/${h(e.order_id)}">${h(e.order_id.slice(0,8))}</a>` : '新用户体验'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="billing-empty">还没有次数变动。</p>'}</details>
       ${o.support ? `<p class="billing-help">订单咨询：${h(o.support)}</p>` : ''}`, '我的账号');
   }
   renderPlans() {
     const o = this.overview;
     this.shell(`${this.heading('为下一次机会做好准备', '按需要购买次数。先查看示例，再决定是否适合自己的求职阶段。', '<a class="text-link" href="#prepare/example/refine">体验完整示例 ↗</a>')}${this.tabs()}
+      ${!o.account ? '<p class="billing-note">新账号注册可免费体验诊断、精修、岗位适配和文字面试各一次。<a class="text-link" href="#account/register?next=start">注册并领取 ↗</a></p>' : ''}
       ${!o.enabled ? '<section class="billing-card billing-disabled-copy"><h2>购买暂未开放</h2><p class="billing-caption">收款码和套餐准备好后，会在这里开放购买。现在可以使用现有体验功能和固定示例。</p><div class="billing-actions"><a class="text-link" href="#start">开始诊断 ↗</a></div></section>' : `<div class="billing-plans">${o.plans.map(plan => `<article class="billing-plan"><p class="eyebrow">按次使用 · 人工确认到账</p><h2>${h(plan.name)}</h2><div class="billing-price">${money(plan.price_cents)}<small>一次购买，按功能使用</small></div>${included(plan.credits)}${o.account ? `<form class="billing-form" data-form="checkout"><input type="hidden" name="plan_id" value="${h(plan.id)}"><fieldset><label class="billing-check"><input type="checkbox" name="confirmed" required><span>我已阅读下方规则，接受人工核款、次数扣除和退款方式。</span></label><button class="button primary full-width" ${o.purchasing_available ? '' : 'disabled'}>创建订单，查看收款码 ↗</button></fieldset></form>` : '<a class="button primary" href="#account/login?next=plans">登录后购买 ↗</a>'}</article>`).join('')}</div>${!o.purchasing_available ? '<p class="billing-note">生成服务暂不可用，请稍后再购买。</p>' : ''}`}
       ${rules}${o.support ? `<p class="billing-help">付款或退款咨询：${h(o.support)}</p>` : ''}`, '购买次数');
   }

@@ -45,6 +45,21 @@ func accountAuth(t *testing.T, b *browser, mode, username, password, recovery st
 	return data.Recovery
 }
 
+// Existing billing tests model accounts created before registration gifts.
+// New-user tests use the real registration endpoint without this fixture step.
+func registerExistingAccount(t *testing.T, b *browser, username, password string, claim bool) string {
+	t.Helper()
+	recovery := accountAuth(t, b, "register", username, password, "", claim)
+	owner := accountOwner(t, b)
+	if _, err := b.app.store.db.Exec("DELETE FROM billing_welcome_grants WHERE owner_id=?", owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.app.store.db.Exec("DELETE FROM billing_events WHERE owner_id=? AND event='welcome_granted'", owner); err != nil {
+		t.Fatal(err)
+	}
+	return recovery
+}
+
 func accountOwner(t *testing.T, b *browser) string {
 	t.Helper()
 	owner, err := b.app.store.Session(b.cookie.Value, time.Now())
@@ -141,7 +156,7 @@ func wantBalance(t *testing.T, b *browser, kind string, want CreditBalance) {
 func TestBillingAccountsRotateSessionsAndKeepOwnershipSeparate(t *testing.T) {
 	a, b, id, reportCode := preparationApp(t)
 	old := *b
-	recovery := accountAuth(t, b, "register", "Account_A", "a-long-test-password", "", true)
+	recovery := registerExistingAccount(t, b, "Account_A", "a-long-test-password", true)
 	if !strings.HasPrefix(recovery, "JCA-") || len(recovery) != 52 || b.cookie.Value == old.cookie.Value || b.csrf == old.csrf {
 		t.Fatal("missing one-time recovery or session rotation")
 	}
@@ -161,7 +176,7 @@ func TestBillingAccountsRotateSessionsAndKeepOwnershipSeparate(t *testing.T) {
 		t.Fatal("credentials stored incorrectly")
 	}
 	other := newBrowser(t, a)
-	accountAuth(t, other, "register", "account_b", "b-long-test-password", "", false)
+	registerExistingAccount(t, other, "account_b", "b-long-test-password", false)
 	accountAuth(t, b, "login", "account_b", "b-long-test-password", "", true)
 	if b.request("GET", "/api/diagnoses/"+id, nil).Code != 404 {
 		t.Fatal("registered accounts merged their reports")
@@ -201,7 +216,7 @@ func TestBillingAccountsRotateSessionsAndKeepOwnershipSeparate(t *testing.T) {
 func TestBillingOrderClaimsPricingSnapshotsAndConcurrentConfirmation(t *testing.T) {
 	a := testApp(t, nil)
 	b := newBrowser(t, a)
-	accountAuth(t, b, "register", "buyer_one", "test-buyer-password", "", false)
+	registerExistingAccount(t, b, "buyer_one", "test-buyer-password", false)
 	s := enableTestBilling(t, a, map[string]int{"diagnosis": 1, "refine": 2})
 	key, _ := randomHex(16)
 	body := map[string]any{"plan_id": "test-kit", "request_key": key, "revision": s.Revision, "policy_version": billingPolicyVersion, "confirmed": true}
@@ -283,7 +298,7 @@ func TestBillingOrderClaimsPricingSnapshotsAndConcurrentConfirmation(t *testing.
 	}
 	claimTestOrder(t, b, second, "Different_Receipt_0002")
 	stranger := newBrowser(t, a)
-	accountAuth(t, stranger, "register", "other_buyer", "other-buyer-password", "", false)
+	registerExistingAccount(t, stranger, "other_buyer", "other-buyer-password", false)
 	if stranger.request("GET", "/api/billing/orders/"+order.ID, nil).Code != 404 || stranger.request("GET", "/api/billing/orders/"+order.ID+"/qr", nil).Code != 404 {
 		t.Fatal("order leaked across accounts")
 	}
@@ -296,7 +311,7 @@ func TestBillingOrderClaimsPricingSnapshotsAndConcurrentConfirmation(t *testing.
 func TestBillingLastCreditReservationIsAtomicAndQueueRollback(t *testing.T) {
 	a := testApp(t, nil)
 	b := newBrowser(t, a)
-	accountAuth(t, b, "register", "concurrent_user", "test-concurrent-password", "", false)
+	registerExistingAccount(t, b, "concurrent_user", "test-concurrent-password", false)
 	enableTestBilling(t, a, map[string]int{"diagnosis": 1})
 	fundAccount(t, b)
 	ctx, now, owner := context.Background(), time.Now(), accountOwner(t, b)
@@ -354,7 +369,7 @@ func TestBillingLastCreditReservationIsAtomicAndQueueRollback(t *testing.T) {
 func TestBillingFailedDeletedAndExhaustedJobsReturnCreditOnce(t *testing.T) {
 	a := testApp(t, nil)
 	b := newBrowser(t, a)
-	accountAuth(t, b, "register", "failure_user", "test-failure-password", "", false)
+	registerExistingAccount(t, b, "failure_user", "test-failure-password", false)
 	enableTestBilling(t, a, map[string]int{"diagnosis": 1})
 	order := fundAccount(t, b)
 	ctx, now, owner := context.Background(), time.Now(), accountOwner(t, b)
@@ -442,7 +457,7 @@ func refineAnswers() map[string]any {
 
 func TestBillingRefinementBundlesAndFailureRetry(t *testing.T) {
 	a, b, id, _ := preparationApp(t)
-	accountAuth(t, b, "register", "refine_user", "refine-test-password", "", true)
+	registerExistingAccount(t, b, "refine_user", "refine-test-password", true)
 	enableTestBilling(t, a, map[string]int{"refine": 1, "tailor": 1})
 	fundAccount(t, b)
 	changePreparation(t, b, id, "questions", nil, 202)
@@ -483,7 +498,7 @@ func TestBillingRefinementBundlesAndFailureRetry(t *testing.T) {
 
 func TestBillingExistingPaidRoundsSettleWhenPurchasingIsDisabled(t *testing.T) {
 	a, b, id, _ := preparationApp(t)
-	accountAuth(t, b, "register", "billing_toggle", "toggle-test-password", "", true)
+	registerExistingAccount(t, b, "billing_toggle", "toggle-test-password", true)
 	enableTestBilling(t, a, map[string]int{"refine": 1})
 	fundAccount(t, b)
 	changePreparation(t, b, id, "questions", nil, 202)
@@ -526,7 +541,7 @@ func TestBillingInterviewSessionOwnershipAndLegacyFreeContinuation(t *testing.T)
 	a, b, id, code := preparationApp(t)
 	legacy := changePreparation(t, b, id, "start_interview", map[string]any{"rounds": 3, "focus": "project"}, 202).Preparation.Interviews[0].ID
 	finishPreparation(t, a, b, id)
-	accountAuth(t, b, "register", "interview_user", "interview-password", "", true)
+	registerExistingAccount(t, b, "interview_user", "interview-password", true)
 	enableTestBilling(t, a, map[string]int{"interview": 1})
 	fundAccount(t, b)
 	changePreparation(t, b, id, "answer", map[string]any{"interview_id": legacy, "question_id": "q1", "answer": "旧免费练习仍然可以继续，不扣除新购买的次数。"}, 202)
@@ -538,7 +553,7 @@ func TestBillingInterviewSessionOwnershipAndLegacyFreeContinuation(t *testing.T)
 	wantBalance(t, b, "interview", CreditBalance{Reserved: 1})
 	finishPreparation(t, a, b, id)
 	other := newBrowser(t, a)
-	accountAuth(t, other, "register", "interview_other", "another-password", "", false)
+	registerExistingAccount(t, other, "interview_other", "another-password", false)
 	if w := other.request("POST", "/api/recover", map[string]string{"code": code}); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -555,7 +570,7 @@ func TestBillingInterviewSessionOwnershipAndLegacyFreeContinuation(t *testing.T)
 
 func TestBillingRefundHoldActiveTasksAndPartialRefund(t *testing.T) {
 	a, b, id, _ := preparationApp(t)
-	accountAuth(t, b, "register", "refund_user", "refund-test-password", "", true)
+	registerExistingAccount(t, b, "refund_user", "refund-test-password", true)
 	enableTestBilling(t, a, map[string]int{"refine": 2, "diagnosis": 2})
 	order := fundAccount(t, b)
 	changePreparation(t, b, id, "questions", nil, 202)
@@ -678,7 +693,7 @@ func TestBillingAdminAuthorizationQRAndExplicitReceiptConfirmation(t *testing.T)
 	if admin.request("GET", "/api/admin/billing/qr/"+qr["id"], nil).Code != 200 || customer.request("GET", "/api/admin/billing/qr/"+qr["id"], nil).Code != 401 {
 		t.Fatal("QR access not private")
 	}
-	accountAuth(t, customer, "register", "admin_test_buyer", "test-buyer-password", "", false)
+	registerExistingAccount(t, customer, "admin_test_buyer", "test-buyer-password", false)
 	enableTestBilling(t, a, map[string]int{"diagnosis": 1})
 	order := claimTestOrder(t, customer, createTestOrder(t, customer), "ADMIN_TEST_TRADE")
 	request := map[string]any{"action": "confirm", "revision": order.Revision, "amount_cents": 1990, "receipt": "ADMIN_TEST_TRADE", "confirmed": false}
@@ -720,7 +735,7 @@ func TestBillingMigrationAndLatePaymentClaims(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = a.store.db.Exec("DELETE FROM schema_migrations WHERE version=3"); err != nil {
+	if _, err = a.store.db.Exec("DELETE FROM schema_migrations WHERE version>=3"); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.store.Close(); err != nil {
@@ -735,10 +750,10 @@ func TestBillingMigrationAndLatePaymentClaims(t *testing.T) {
 		t.Fatal("v2 data changed during migration")
 	}
 	var version int
-	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 3 {
-		t.Fatal("v3 not installed", err)
+	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 4 {
+		t.Fatal("v4 not installed", err)
 	}
-	accountAuth(t, b, "register", "late_buyer", "late-buyer-password", "", true)
+	registerExistingAccount(t, b, "late_buyer", "late-buyer-password", true)
 	s := enableTestBilling(t, a, map[string]int{"diagnosis": 1})
 	key, _ := randomHex(16)
 	oldID, err := a.store.CreateBillingOrder(context.Background(), accountOwner(t, b), "test", s.Plans[0].ID, key, s.Revision, time.Now().Add(-3*time.Hour))

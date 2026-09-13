@@ -19,7 +19,7 @@ func billingError(w http.ResponseWriter, err error) bool {
 	status, code, message := 0, "", ""
 	switch {
 	case errors.Is(err, ErrAccountRequired):
-		status, code, message = 402, "account_required", "请先登录账号，再使用购买的次数。"
+		status, code, message = 402, "account_required", "请先登录账号。新账号注册后可免费体验各项功能一次。"
 	case errors.Is(err, ErrCreditRequired):
 		status, code, message = 402, "credits_required", "这项功能的可用次数不足，请到账号页查看次数或购买套餐。"
 	case errors.Is(err, ErrBillingClosed):

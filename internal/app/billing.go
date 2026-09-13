@@ -95,16 +95,18 @@ type billingValidationError struct{ message string }
 func (e *billingValidationError) Error() string { return e.message }
 
 type BillingAccount struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	CreatedAt int64  `json:"created_at"`
+	ID             string `json:"id"`
+	Username       string `json:"username"`
+	CreatedAt      int64  `json:"created_at"`
+	WelcomeGranted bool   `json:"welcome_granted"`
 }
 
 type CreditBalance struct {
-	Available int `json:"available"`
-	Reserved  int `json:"reserved"`
-	Used      int `json:"used"`
-	OnHold    int `json:"on_hold"`
+	Available      int `json:"available"`
+	Reserved       int `json:"reserved"`
+	Used           int `json:"used"`
+	OnHold         int `json:"on_hold"`
+	TrialAvailable int `json:"trial_available"`
 }
 
 type BillingEvent struct {

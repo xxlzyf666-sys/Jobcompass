@@ -104,7 +104,7 @@ func (s *Store) BillingQRCode(ctx context.Context, id string) ([]byte, error) {
 
 func (s *Store) BillingAccount(ctx context.Context, owner string) (*BillingAccount, error) {
 	var account BillingAccount
-	err := s.db.QueryRowContext(ctx, "SELECT owner_id,username,created_at FROM billing_accounts WHERE owner_id=?", owner).Scan(&account.ID, &account.Username, &account.CreatedAt)
+	err := s.db.QueryRowContext(ctx, "SELECT a.owner_id,a.username,a.created_at,EXISTS(SELECT 1 FROM billing_welcome_grants g WHERE g.owner_id=a.owner_id) FROM billing_accounts a WHERE a.owner_id=?", owner).Scan(&account.ID, &account.Username, &account.CreatedAt, &account.WelcomeGranted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -119,20 +119,26 @@ func (s *Store) BillingWallet(ctx context.Context, owner string) (map[string]Cre
 	for _, kind := range creditKinds {
 		balances[kind] = CreditBalance{}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT g.kind,
- SUM(CASE WHEN o.status='paid' AND o.refund_requested_at=0 THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END),
+	rows, err := s.db.QueryContext(ctx, `WITH grants AS (
+ SELECT g.kind,g.units,o.id order_id,o.status='paid' AND o.refund_requested_at=0 spendable,o.refund_requested_at>0 held,0 trial
+ FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id WHERE o.owner_id=?
+ UNION ALL SELECT kind,units,NULL,1,0,1 FROM billing_welcome_grants WHERE owner_id=?
+ ), usage AS (
+ SELECT order_id,kind,SUM(state='reserved') reserved,SUM(state='consumed') used FROM billing_usage WHERE owner_id=? GROUP BY order_id,kind
+ ) SELECT g.kind,
+ SUM(CASE WHEN g.spendable THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END),
  SUM(COALESCE(u.reserved,0)), SUM(COALESCE(u.used,0)),
- SUM(CASE WHEN o.refund_requested_at>0 THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END)
- FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id
- LEFT JOIN (SELECT order_id,kind,SUM(state='reserved') reserved,SUM(state='consumed') used FROM billing_usage WHERE owner_id=? GROUP BY order_id,kind) u ON u.order_id=g.order_id AND u.kind=g.kind
- WHERE o.owner_id=? GROUP BY g.kind`, owner, owner)
+ SUM(CASE WHEN g.held THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END),
+ SUM(CASE WHEN g.trial THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END)
+ FROM grants g LEFT JOIN usage u ON u.order_id IS g.order_id AND u.kind=g.kind
+ GROUP BY g.kind`, owner, owner, owner)
 	if err != nil {
 		return nil, nil, err
 	}
 	for rows.Next() {
 		var kind string
 		var balance CreditBalance
-		if err = rows.Scan(&kind, &balance.Available, &balance.Reserved, &balance.Used, &balance.OnHold); err != nil {
+		if err = rows.Scan(&kind, &balance.Available, &balance.Reserved, &balance.Used, &balance.OnHold, &balance.TrialAvailable); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
@@ -166,9 +172,9 @@ func (s *Store) reserveBillingCredit(ctx context.Context, tx *sql.Tx, owner, ope
 	if err != nil {
 		return err
 	}
-	var previousOwner, state string
+	var previousOwner, state, previousOrder string
 	var completed int
-	err = tx.QueryRowContext(ctx, "SELECT owner_id,state,completed FROM billing_usage WHERE id=?", operation).Scan(&previousOwner, &state, &completed)
+	err = tx.QueryRowContext(ctx, "SELECT owner_id,state,completed,COALESCE(order_id,'') FROM billing_usage WHERE id=?", operation).Scan(&previousOwner, &state, &completed, &previousOrder)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -180,13 +186,15 @@ func (s *Store) reserveBillingCredit(ctx context.Context, tx *sql.Tx, owner, ope
 		if previousOwner != owner {
 			return ErrBillingAccess
 		}
-		var orderStatus string
-		var refundPending, refunded int64
-		if err = tx.QueryRowContext(ctx, "SELECT o.status,o.refund_requested_at,o.refunded_cents FROM billing_orders o JOIN billing_usage u ON u.order_id=o.id WHERE u.id=?", operation).Scan(&orderStatus, &refundPending, &refunded); err != nil {
-			return err
-		}
-		if state != "released" && (orderStatus == "refunded" || refundPending != 0 || refunded > 0) {
-			return &billingValidationError{"本轮关联的订单正在处理退款或已经退款，请先查看订单。"}
+		if previousOrder != "" {
+			var orderStatus string
+			var refundPending, refunded int64
+			if err = tx.QueryRowContext(ctx, "SELECT status,refund_requested_at,refunded_cents FROM billing_orders WHERE id=?", previousOrder).Scan(&orderStatus, &refundPending, &refunded); err != nil {
+				return err
+			}
+			if state != "released" && (orderStatus == "refunded" || refundPending != 0 || refunded > 0) {
+				return &billingValidationError{"本轮关联的订单正在处理退款或已经退款，请先查看订单。"}
+			}
 		}
 		if finishRefinement && completed != 0 {
 			return ErrRoundCompleted
@@ -206,16 +214,24 @@ func (s *Store) reserveBillingCredit(ctx context.Context, tx *sql.Tx, owner, ope
 	if account == 0 {
 		return ErrAccountRequired
 	}
-	var order string
-	err = tx.QueryRowContext(ctx, `SELECT g.order_id FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id
+	var trial int
+	err = tx.QueryRowContext(ctx, `SELECT g.units FROM billing_welcome_grants g WHERE g.owner_id=? AND g.kind=?
+ AND g.units>(SELECT COUNT(*) FROM billing_usage u WHERE u.owner_id=g.owner_id AND u.kind=g.kind AND u.order_id IS NULL AND u.state IN ('reserved','consumed'))`, owner, kind).Scan(&trial)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var order sql.NullString
+	if trial == 0 {
+		err = tx.QueryRowContext(ctx, `SELECT g.order_id FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id
  WHERE o.owner_id=? AND o.status='paid' AND o.refund_requested_at=0 AND g.kind=?
  AND g.units>(SELECT COUNT(*) FROM billing_usage u WHERE u.order_id=g.order_id AND u.kind=g.kind AND u.state IN ('reserved','consumed'))
  ORDER BY o.paid_at,o.id LIMIT 1`, owner, kind).Scan(&order)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrCreditRequired
-	}
-	if err != nil {
-		return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCreditRequired
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if exists {
 		_, err = tx.ExecContext(ctx, "UPDATE billing_usage SET order_id=?,state='reserved',active_task=?,completed=0,updated_at=? WHERE id=?", order, task, now.Unix(), operation)
