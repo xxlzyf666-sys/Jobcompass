@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -104,7 +105,7 @@ func (s *Store) BillingQRCode(ctx context.Context, id string) ([]byte, error) {
 
 func (s *Store) BillingAccount(ctx context.Context, owner string) (*BillingAccount, error) {
 	var account BillingAccount
-	err := s.db.QueryRowContext(ctx, "SELECT a.owner_id,a.username,a.created_at,EXISTS(SELECT 1 FROM billing_welcome_grants g WHERE g.owner_id=a.owner_id) FROM billing_accounts a WHERE a.owner_id=?", owner).Scan(&account.ID, &account.Username, &account.CreatedAt, &account.WelcomeGranted)
+	err := s.db.QueryRowContext(ctx, "SELECT a.owner_id,a.username,a.created_at,EXISTS(SELECT 1 FROM billing_welcome_grants g WHERE g.owner_id=a.owner_id),COALESCE(c.ai_restricted,0) FROM billing_accounts a LEFT JOIN billing_account_controls c ON c.owner_id=a.owner_id WHERE a.owner_id=?", owner).Scan(&account.ID, &account.Username, &account.CreatedAt, &account.WelcomeGranted, &account.AIRestricted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -114,42 +115,56 @@ func (s *Store) BillingAccount(ctx context.Context, owner string) (*BillingAccou
 	return &account, nil
 }
 
-func (s *Store) BillingWallet(ctx context.Context, owner string) (map[string]CreditBalance, []BillingEvent, error) {
-	balances := map[string]CreditBalance{}
-	for _, kind := range creditKinds {
-		balances[kind] = CreditBalance{}
+// The customer wallet and the paginated user list share one calculation.
+func (s *Store) billingWallets(ctx context.Context, owners []string) (map[string]map[string]CreditBalance, error) {
+	wallets := map[string]map[string]CreditBalance{}
+	args := make([]any, 0, len(owners))
+	for _, owner := range owners {
+		wallets[owner] = map[string]CreditBalance{}
+		for _, kind := range creditKinds {
+			wallets[owner][kind] = CreditBalance{}
+		}
+		args = append(args, owner)
 	}
-	rows, err := s.db.QueryContext(ctx, `WITH grants AS (
- SELECT g.kind,g.units,o.id order_id,o.status='paid' AND o.refund_requested_at=0 spendable,o.refund_requested_at>0 held,0 trial
- FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id WHERE o.owner_id=?
- UNION ALL SELECT kind,units,NULL,1,0,1 FROM billing_welcome_grants WHERE owner_id=?
+	if len(owners) == 0 {
+		return wallets, nil
+	}
+	selected := strings.TrimSuffix(strings.Repeat("(?),", len(owners)), ",")
+	rows, err := s.db.QueryContext(ctx, `WITH selected(owner_id) AS (VALUES `+selected+`), grants AS (
+ SELECT o.owner_id,g.kind,g.units,o.id order_id,o.status='paid' AND o.refund_requested_at=0 spendable,o.refund_requested_at>0 held,0 trial
+ FROM billing_grants g JOIN billing_orders o ON o.id=g.order_id JOIN selected a ON a.owner_id=o.owner_id
+ UNION ALL SELECT g.owner_id,g.kind,g.units,NULL,1,0,1 FROM billing_welcome_grants g JOIN selected a ON a.owner_id=g.owner_id
  ), usage AS (
- SELECT order_id,kind,SUM(state='reserved') reserved,SUM(state='consumed') used FROM billing_usage WHERE owner_id=? GROUP BY order_id,kind
- ) SELECT g.kind,
+ SELECT u.owner_id,u.order_id,u.kind,SUM(u.state='reserved') reserved,SUM(u.state='consumed') used
+ FROM billing_usage u JOIN selected a ON a.owner_id=u.owner_id GROUP BY u.owner_id,u.order_id,u.kind
+ ) SELECT g.owner_id,g.kind,
  SUM(CASE WHEN g.spendable THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END),
  SUM(COALESCE(u.reserved,0)), SUM(COALESCE(u.used,0)),
  SUM(CASE WHEN g.held THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END),
  SUM(CASE WHEN g.trial THEN g.units-COALESCE(u.reserved,0)-COALESCE(u.used,0) ELSE 0 END)
- FROM grants g LEFT JOIN usage u ON u.order_id IS g.order_id AND u.kind=g.kind
- GROUP BY g.kind`, owner, owner, owner)
+ FROM grants g LEFT JOIN usage u ON u.owner_id=g.owner_id AND u.order_id IS g.order_id AND u.kind=g.kind
+ GROUP BY g.owner_id,g.kind`, args...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
-		var kind string
+		var owner, kind string
 		var balance CreditBalance
-		if err = rows.Scan(&kind, &balance.Available, &balance.Reserved, &balance.Used, &balance.OnHold, &balance.TrialAvailable); err != nil {
-			rows.Close()
-			return nil, nil, err
+		if err = rows.Scan(&owner, &kind, &balance.Available, &balance.Reserved, &balance.Used, &balance.OnHold, &balance.TrialAvailable); err != nil {
+			return nil, err
 		}
-		balances[kind] = balance
+		wallets[owner][kind] = balance
 	}
-	err = rows.Err()
-	rows.Close()
+	return wallets, rows.Err()
+}
+
+func (s *Store) BillingWallet(ctx context.Context, owner string) (map[string]CreditBalance, []BillingEvent, error) {
+	wallets, err := s.billingWallets(ctx, []string{owner})
 	if err != nil {
 		return nil, nil, err
 	}
-	rows, err = s.db.QueryContext(ctx, "SELECT id,order_id,kind,event,units,created_at FROM billing_events WHERE owner_id=? ORDER BY id DESC LIMIT 60", owner)
+	rows, err := s.db.QueryContext(ctx, "SELECT id,order_id,kind,event,units,created_at FROM billing_events WHERE owner_id=? ORDER BY id DESC LIMIT 60", owner)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,7 +177,7 @@ func (s *Store) BillingWallet(ctx context.Context, owner string) (map[string]Cre
 		}
 		events = append(events, event)
 	}
-	return balances, events, rows.Err()
+	return wallets[owner], events, rows.Err()
 }
 
 // Account balance, reservation and task insertion are guarded by one transaction.

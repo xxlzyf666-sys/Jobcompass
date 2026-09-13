@@ -90,6 +90,9 @@ func (s *Store) SavePreparation(ctx context.Context, owner, ip, id string, p Pre
 		return ErrConflict
 	}
 	if input != nil {
+		if err = s.allowAccountAI(ctx, tx, owner); err != nil {
+			return err
+		}
 		if err = tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM diagnoses WHERE status IN ('pending','running') AND expires_at>?) + (SELECT COUNT(*) FROM preparation_tasks t JOIN diagnoses d ON d.id=t.diagnosis_id WHERE t.status IN ('pending','running') AND d.expires_at>?)`, now.Unix(), now.Unix()).Scan(&active); err != nil {
 			return err
 		}

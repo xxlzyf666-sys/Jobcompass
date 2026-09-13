@@ -18,6 +18,8 @@ func billingError(w http.ResponseWriter, err error) bool {
 	var validation *billingValidationError
 	status, code, message := 0, "", ""
 	switch {
+	case errors.Is(err, ErrAIRestricted):
+		status, code, message = 403, "account_restricted", "这个账号暂时无法使用 AI 生成。已有材料、次数和订单仍保留，请到账号页联系运营者。"
 	case errors.Is(err, ErrAccountRequired):
 		status, code, message = 402, "account_required", "请先登录账号。新账号注册后可免费体验各项功能一次。"
 	case errors.Is(err, ErrCreditRequired):
@@ -83,6 +85,9 @@ func (a *App) billingRoutes() {
 	a.mux.HandleFunc("GET /api/admin/orders", a.adminOrders)
 	a.mux.HandleFunc("GET /api/admin/orders/{order}", a.adminOrder)
 	a.mux.HandleFunc("POST /api/admin/orders/{order}", a.adminReviewOrder)
+	a.mux.HandleFunc("GET /api/admin/users", a.adminUsers)
+	a.mux.HandleFunc("GET /api/admin/users/{user}", a.adminUser)
+	a.mux.HandleFunc("POST /api/admin/users/{user}", a.adminChangeUser)
 }
 
 func (a *App) setAccountCookie(w http.ResponseWriter, token string) {
@@ -495,10 +500,18 @@ func (a *App) adminOrders(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "搜索内容过长。")
 		return
 	}
-	orders, err := a.store.BillingOrders(r.Context(), "", r.URL.Query().Get("status"), search, billingPage(r))
+	owner := r.URL.Query().Get("owner")
+	if owner != "" && !validID(owner) {
+		jsonError(w, 400, "用户编号无效，请从用户详情重新打开订单。")
+		return
+	}
+	orders, err := a.store.BillingOrders(r.Context(), owner, r.URL.Query().Get("status"), search, billingPage(r))
 	if err != nil {
 		billingStoreError(w, err)
 		return
+	}
+	for i := range orders {
+		orders[i].AccountID = orders[i].OwnerID
 	}
 	jsonResponse(w, 200, map[string]any{"orders": orders})
 }
@@ -512,6 +525,7 @@ func (a *App) adminOrder(w http.ResponseWriter, r *http.Request) {
 		billingStoreError(w, err)
 		return
 	}
+	order.AccountID = order.OwnerID
 	jsonResponse(w, 200, order)
 }
 

@@ -750,8 +750,8 @@ func TestBillingMigrationAndLatePaymentClaims(t *testing.T) {
 		t.Fatal("v2 data changed during migration")
 	}
 	var version int
-	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 4 {
-		t.Fatal("v4 not installed", err)
+	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 5 {
+		t.Fatal("v5 not installed", err)
 	}
 	registerExistingAccount(t, b, "late_buyer", "late-buyer-password", true)
 	s := enableTestBilling(t, a, map[string]int{"diagnosis": 1})

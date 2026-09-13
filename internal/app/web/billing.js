@@ -3,6 +3,8 @@ const kinds = { diagnosis:'逐项诊断', refine:'简历精修', tailor:'岗位�
 const units = { diagnosis:'次', refine:'轮', tailor:'次', interview:'场' };
 const statuses = { awaiting_payment:'待付款', submitted:'待人工核款', paid:'已发放', rejected:'需补充核对', cancelled:'已取消', expired:'已过期', refunded:'已退款' };
 const eventNames = { welcome_granted:'注册赠送', granted:'到账发放', reserved:'生成中预占', consumed:'生成完成', released:'退回次数', revoked:'退款收回' };
+const userActions = {note:'保存管理备注',grant_welcome:'补发四项体验',restrict:'限制 AI 生成',restore:'恢复 AI 生成',revoke_sessions:'退出全部设备'};
+const userActionHelp = {grant_welcome:'诊断、精修、岗位适配和面试各赠送一次。每个账号仅可领取一次，已购次数保持不变。',restrict:'停止这个账号后续的 AI 生成请求。已提交的任务继续完成；材料查看、手动编辑、导出和订单售后仍可使用。',restore:'恢复这个账号的 AI 生成权限，继续按现有次数和频率限制使用。',revoke_sessions:'使这个账号的全部登录会话失效。用户需要重新登录，密码、材料和次数保持不变。'};
 const money = value => `¥${(Number(value || 0) / 100).toFixed(2)}`;
 function cents(value) {
   if (!/^\d{1,4}(\.\d{1,2})?$/.test(value)) throw new Error('金额请填写最多两位小数的人民币数值。');
@@ -33,7 +35,10 @@ export class BillingUI {
       if (form) this.drafts.set(`${this.route}:${form.dataset.draft}`, Object.fromEntries(new FormData(form)));
       if (event.target.closest('#billing-settings')) { this.settingsDirty = true; const note = this.root.querySelector('[data-dirty]'); if (note) note.hidden = false; }
     });
-    this.root.addEventListener('change', event => { if (event.target.id === 'billing-qr-file') this.uploadQR(event.target.files[0]); });
+    this.root.addEventListener('change', event => {
+      if (event.target.id === 'billing-qr-file') this.uploadQR(event.target.files[0]);
+      if (event.target.id === 'admin-user-action') this.updateUserAction();
+    });
     this.root.addEventListener('error', event => {
       if (event.target.matches('img.billing-qr')) { event.target.hidden = true; event.target.nextElementSibling.hidden = false; }
     }, true);
@@ -53,10 +58,10 @@ export class BillingUI {
     this.root.innerHTML = `<div class="billing-view"><p id="billing-message" class="form-error billing-alert" role="alert" hidden></p>${content}</div>`;
   }
   heading(title, description, action = '') {
-    return `<div class="billing-heading"><div><p class="eyebrow">岗位罗盘 · ${this.isAdmin ? '收款管理' : '账号与次数'}</p><h1>${title}</h1><p>${description}</p></div>${action ? `<div class="billing-actions">${action}</div>` : ''}</div>`;
+    return `<div class="billing-heading"><div><p class="eyebrow">岗位罗盘 · ${this.isAdmin ? '管理后台' : '账号与次数'}</p><h1>${title}</h1><p>${description}</p></div>${action ? `<div class="billing-actions">${action}</div>` : ''}</div>`;
   }
   tabs() { return '<nav class="billing-tabs" aria-label="账号页面"><a href="#account" '+(this.route === 'account' ? 'aria-current="page"' : '')+'>我的账号</a><a href="#plans" '+(this.route === 'plans' ? 'aria-current="page"' : '')+'>购买次数</a><a href="#history">我的报告 ↗</a></nav>'; }
-  adminTabs() { return `<nav class="billing-tabs" aria-label="管理页面"><a href="#admin" ${this.route === 'admin' ? 'aria-current="page"' : ''}>订单核对</a><a href="#admin/settings" ${this.route === 'admin/settings' ? 'aria-current="page"' : ''}>收款与套餐</a><a href="#account">返回账号页 ↗</a></nav>`; }
+  adminTabs() { return `<nav class="billing-tabs" aria-label="管理页面"><a href="#admin" ${this.route === 'admin' || this.route.startsWith('admin/order/') ? 'aria-current="page"' : ''}>订单核对</a><a href="#admin/users" ${this.route.startsWith('admin/users') ? 'aria-current="page"' : ''}>用户管理</a><a href="#admin/settings" ${this.route === 'admin/settings' ? 'aria-current="page"' : ''}>收款与套餐</a><a href="#account">返回账号页 ↗</a></nav>`; }
   draft(name) { return this.drafts.get(`${this.route}:${name}`) || {}; }
   async request(path, body, admin = false, raw = false) {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
@@ -71,9 +76,20 @@ export class BillingUI {
       if (!response.ok) { const error = new Error(result.error || '请求未完成，请稍后重试。'); error.status = response.status; error.code = result.code; throw error; }
       return result;
     } catch (error) {
-      if (error.name === 'AbortError' || error instanceof TypeError) throw new Error('连接中断或请求超时。请刷新订单核对结果，避免重复付款。');
+      if (error.name === 'AbortError' || error instanceof TypeError) throw new Error('连接中断或请求超时。请刷新页面核对结果后再重试。');
       throw error;
     } finally { clearTimeout(timer); }
+  }
+  async recoverSession(error, token) {
+    if (error.status !== 401 || this.isAdmin || !this.active || token !== this.token) return false;
+    this.recovery = null; this.overview = null; this.order = null;
+    this.drafts.clear(); this.checkoutKeys.clear();
+    await this.onAuth('logout');
+    if (this.active && token === this.token) {
+      this.renderAuth('login');
+      this.message('登录已失效，请重新登录。账号、次数和订单仍保留。');
+    }
+    return true;
   }
   async open(route) {
     this.stop(); this.active = true;
@@ -82,13 +98,19 @@ export class BillingUI {
     this.params = new URLSearchParams(this.query);
     this.page = Math.max(0, Math.min(1000, Number(this.params.get('page')) || 0));
     this.isAdmin = this.route === 'admin' || this.route.startsWith('admin/');
-    this.shell('<div class="billing-empty" role="status">正在读取…</div>', this.isAdmin ? '收款管理' : '账号与次数');
+    this.shell('<div class="billing-empty" role="status">正在读取…</div>', this.isAdmin ? '管理后台' : '账号与次数');
     try {
       if (this.isAdmin) {
         const session = await this.request('/api/admin/session');
         if (!this.active || token !== this.token) return;
         this.admin = session;
         if (!session.authenticated) { this.renderAdminLogin(); return; }
+        if (this.route === 'admin/users') {
+          const data = await this.request(`/api/admin/users?${this.params}`, undefined, true);
+          if (this.active && token === this.token) { this.userListReturn = route; this.renderAdminUsers(data); }
+          return;
+        }
+        if (/^admin\/users\/[a-f0-9]{32}$/.test(this.route)) { await this.loadUser(token); return; }
         if (this.route === 'admin/settings') {
           if (!this.settingsDraft) this.settingsDraft = await this.request('/api/admin/billing', undefined, true);
           if (this.active && token === this.token) this.renderSettings();
@@ -116,14 +138,15 @@ export class BillingUI {
       throw new Error('没有找到这个账号页面。');
     } catch (error) {
       if (!this.active || token !== this.token) return;
-      this.shell(`${this.heading('暂时无法打开', h(error.message))}<div class="billing-actions"><button class="button secondary" data-billing="reload">重新读取</button><a class="text-link" href="#account">我的账号</a><a class="text-link" href="#admin">收款管理</a></div>`, '访问提示');
+      if (await this.recoverSession(error, token)) return;
+      this.shell(`${this.heading('暂时无法打开', h(error.message))}<div class="billing-actions"><button class="button secondary" data-billing="reload">重新读取</button><a class="text-link" href="#account">我的账号</a><a class="text-link" href="#admin">管理后台</a></div>`, '访问提示');
     }
   }
   renderAuth(mode = this.route.split('/')[1] || 'login') {
     if (!['login','register','reset'].includes(mode)) mode = 'login';
     const creating = mode === 'register', resetting = mode === 'reset';
     const title = creating ? '创建你的账号' : resetting ? '用恢复码重设密码' : '登录你的账号';
-    const next = this.params.get('next') || (this.route.startsWith('order/') ? this.route : 'account');
+    const next = this.params.get('next') || (this.route.startsWith('order/') || this.route === 'plans' ? this.route : 'account');
     this.authNext = /^(account|plans|start|order\/[a-f0-9]{32}|prepare\/[a-f0-9]{32}\/(refine|versions|interview))$/.test(next) ? next : 'account';
     const suffix = `?next=${encodeURIComponent(this.authNext)}`;
     this.shell(`<div class="billing-auth">${this.heading(title, resetting ? '账号恢复码以 JCA- 开头，与报告恢复码不同。重设后旧密码、旧恢复码和其他登录会话都会失效。' : creating ? '注册即赠诊断 1 次、简历精修 1 轮、岗位适配 1 次、文字面试 1 场，无需付款即可体验。' : '体验次数、购买次数与订单保存在账号里，换浏览器后登录即可继续使用。')}
@@ -144,6 +167,7 @@ export class BillingUI {
   renderAccount(orders) {
     const o = this.overview;
     this.shell(`${this.heading(h(o.account.username), '次数绑定当前账号。材料到期不会删除购买记录；换设备后使用账号密码登录。', '<button class="text-link muted" data-billing="logout">退出账号</button>')}${this.tabs()}${this.recoveryCard()}
+      ${o.account.ai_restricted ? '<p class="billing-note pending" role="status">这个账号暂时限制 AI 生成。已有材料和次数保留，仍可查看、编辑、导出和处理订单售后。如需恢复，请联系运营者。</p>' : ''}
       ${!o.enabled ? '<p class="billing-note">目前暂未开放购买，生成沿用当前体验规则。已有订单仍可查询、核款及申请退款。</p>' : ''}
       ${o.account.welcome_granted ? '<aside class="billing-note"><strong>新用户体验已赠送</strong><p>诊断、精修、岗位适配、文字面试各一次，优先使用赠送次数。每个账号仅领取一次，重新登录不会重置；最终生成失败会退回对应次数。</p></aside>' : ''}
       <div class="billing-credit-grid">${Object.keys(kinds).map(k => { const b = o.wallet[k], trial = b.trial_available || 0; return `<article class="billing-credit"><h2>${kinds[k]}</h2><strong>${b.available}</strong><small>${units[k]}可用</small><p class="billing-credit-sources"><span>免费体验 ${trial}</span><span>已购 ${b.available - trial}</span></p><p>预占 ${b.reserved} · 已用 ${b.used}${b.on_hold ? ` · 退款暂停 ${b.on_hold}` : ''}</p></article>`; }).join('')}</div>
@@ -161,7 +185,7 @@ export class BillingUI {
   }
   orderTable(orders, admin = false) {
     if (!orders.length) return '<p class="billing-empty">这里还没有订单。</p>';
-    return `<div class="billing-table-wrap"><table class="billing-table"><thead><tr><th>订单 / 套餐${admin ? ' / 账号' : ''}</th><th>金额</th><th>状态</th><th></th></tr></thead><tbody>${orders.map(o => `<tr><td>${h(o.plan_name)}<small>${h(o.id.slice(0,12))} · ${h(this.dateText(o.created_at, true))}</small>${admin ? `<small>${h(o.username)}</small>` : ''}</td><td>${money(o.amount_cents)}${o.refunded_cents ? `<small>退 ${money(o.refunded_cents)}</small>` : ''}</td><td>${this.tag(o)}</td><td><a href="#${admin ? 'admin/' : ''}order/${h(o.id)}">${admin ? '核对' : '查看'} ↗</a></td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="billing-table-wrap"><table class="billing-table"><thead><tr><th>订单 / 套餐${admin ? ' / 账号' : ''}</th><th>金额</th><th>状态</th><th></th></tr></thead><tbody>${orders.map(o => `<tr><td>${h(o.plan_name)}<small>${h(o.id.slice(0,12))} · ${h(this.dateText(o.created_at, true))}</small>${admin ? `<small>${o.account_id ? `<a href="#admin/users/${h(o.account_id)}">${h(o.username)}</a>` : h(o.username)}</small>` : ''}</td><td>${money(o.amount_cents)}${o.refunded_cents ? `<small>退 ${money(o.refunded_cents)}</small>` : ''}</td><td>${this.tag(o)}</td><td><a href="#${admin ? 'admin/' : ''}order/${h(o.id)}">${admin ? '核对' : '查看'} ↗</a></td></tr>`).join('')}</tbody></table></div>`;
   }
   pager(orders, route) {
     const link = page => { const p = new URLSearchParams(this.params); p.set('page', page); return `#${route}?${p}`; };
@@ -195,7 +219,7 @@ export class BillingUI {
     this.shell(`${this.heading(heading, admin ? '请在收款平台核实交易、金额和付款人后登记。用户提交的单号仅作为核对线索。' : '每笔订单只付一次。付款后提交完整交易单号，等待人工核实到账。', '<button class="text-link" data-billing="reload-order">刷新状态 ↻</button>')}${admin ? this.adminTabs() : this.tabs()}
       <article class="billing-receipt ${status === 'awaiting_payment' && !admin ? 'payment-open' : ''}"><div class="billing-receipt-main"><p class="billing-order-number">ORDER / ${h(o.id)}</p><h2>${h(o.plan_name)}</h2>${this.tag(o)}<div class="billing-price">${money(o.amount_cents)}</div>
       <ol class="billing-order-steps"><li class="done"><span>01</span>创建订单</li><li class="${o.claim ? 'done' : ''}"><span>02</span>提交交易单号</li><li class="${paid ? 'done' : ''}"><span>03</span>核实并发放</li></ol>${included(s.plan.credits)}
-      <dl class="billing-description-list"><div><dt>账号</dt><dd>${h(o.username || this.overview?.account?.username)}</dd></div><div><dt>创建时间</dt><dd>${h(this.dateText(o.created_at, true))}</dd></div><div><dt>收款方式</dt><dd>${s.channel === 'alipay' ? '支付宝' : '微信'}</dd></div><div><dt>收款名称</dt><dd>${h(s.payee)}</dd></div>${o.paid_at ? `<div><dt>发放时间</dt><dd>${h(this.dateText(o.paid_at, true))}</dd></div>` : ''}${o.refunded_cents ? `<div><dt>累计已退款</dt><dd>${money(o.refunded_cents)}</dd></div>` : ''}</dl>
+      <dl class="billing-description-list"><div><dt>账号</dt><dd>${admin && o.account_id ? `<a class="text-link" href="#admin/users/${h(o.account_id)}">${h(o.username)} ↗</a>` : h(o.username || this.overview?.account?.username)}</dd></div><div><dt>创建时间</dt><dd>${h(this.dateText(o.created_at, true))}</dd></div><div><dt>收款方式</dt><dd>${s.channel === 'alipay' ? '支付宝' : '微信'}</dd></div><div><dt>收款名称</dt><dd>${h(s.payee)}</dd></div>${o.paid_at ? `<div><dt>发放时间</dt><dd>${h(this.dateText(o.paid_at, true))}</dd></div>` : ''}${o.refunded_cents ? `<div><dt>累计已退款</dt><dd>${money(o.refunded_cents)}</dd></div>` : ''}</dl>
       ${o.claim ? `<div class="billing-note"><p><strong>已提交的交易单号</strong><br><span class="billing-order-number">${h(o.claim.receipt)}</span></p>${o.claim.note ? `<p>${h(o.claim.note)}</p>` : ''}</div>` : ''}
       ${o.review ? `<p class="billing-note"><strong>核对结果</strong><br>${h(o.review.note || '已核实到账，次数已发放。')}${admin && o.review.receipt ? `<br>登记收款单号：${h(o.review.receipt)}` : ''}</p>` : ''}
       ${o.refunds?.length ? `<details class="billing-details"><summary>已登记退款 · ${o.refunds.length} 笔</summary>${o.refunds.map(r => `<p class="billing-note">${money(r.amount_cents)} · ${h(this.dateText(r.created_at, true))}<br>退款单号：${h(r.receipt)}<br>${h(r.note)}</p>`).join('')}</details>` : ''}
@@ -215,10 +239,55 @@ export class BillingUI {
     return '<p class="billing-note">本订单已退款，未用次数已收回。已有订单和已生成材料仍按各自保留规则保存。</p>';
   }
   renderAdminLogin() {
-    this.shell(`<div class="billing-auth">${this.heading('收款管理', '使用服务器设置的管理密钥登录，核款权限与普通用户账号分开。')}<section class="billing-card">${this.admin.configured ? '<form class="billing-form" data-form="admin-login"><fieldset><label class="billing-field">管理密钥<input name="key" type="password" minlength="32" maxlength="128" required autocomplete="current-password"></label><button class="button primary full-width">进入收款管理 ↗</button></fieldset></form>' : '<p class="billing-note">管理入口尚未配置。请在服务器设置 BILLING_ADMIN_KEY 后重启服务。</p>'}</section></div>`, '收款管理');
+    this.shell(`<div class="billing-auth">${this.heading('管理后台', '查看用户、处理使用权限，核对到账与退款记录。')}<section class="billing-card">${this.admin.configured ? '<form class="billing-form" data-form="admin-login"><fieldset><label class="billing-field">管理密钥<input name="key" type="password" minlength="32" maxlength="128" required autocomplete="current-password"></label><button class="button primary full-width">进入管理后台 ↗</button></fieldset></form>' : '<p class="billing-note">管理入口尚未配置。请在服务器设置 BILLING_ADMIN_KEY 后重启服务。</p>'}</section></div>`, '管理后台');
+  }
+  userTag(user) { return `<span class="admin-user-status ${user.ai_restricted ? 'restricted' : ''}">${user.ai_restricted ? '限制生成' : '正常使用'}</span>`; }
+  renderAdminUsers(data) {
+    const filtered = Boolean(this.params.get('q') || this.params.get('status'));
+    const pageLink = page => { const p = new URLSearchParams(this.params); p.set('page', page); return `#admin/users?${p}`; };
+    const rows = data.users.map(u => `<tr>
+      <td class="admin-user-identity"><a class="admin-user-name" href="#admin/users/${h(u.id)}">${h(u.username)}</a>${this.userTag(u)}<small>${h(u.id.slice(0,12))}</small></td>
+      <td class="admin-user-balance-cell"><div class="admin-user-balances">${Object.keys(kinds).map(k => `<span>${kinds[k]} <strong>${u.wallet[k].available}</strong></span>`).join('')}</div></td>
+      <td data-label="订单">${u.order_count} 笔</td>
+      <td class="admin-user-dates"><span>注册 ${h(this.dateText(u.created_at))}</span><small>最近登录 ${u.last_login_at ? h(this.dateText(u.last_login_at, true)) : '暂无记录'}</small></td>
+      <td class="admin-user-detail-link"><a href="#admin/users/${h(u.id)}" aria-label="查看 ${h(u.username)} 的用户详情">查看详情 ↗</a></td></tr>`).join('');
+    this.shell(`${this.heading('用户管理', '核对每个账号的次数、订单和使用状态。', '<button class="text-link muted" data-billing="admin-logout">退出管理</button>')}${this.adminTabs()}
+      <div class="admin-user-stats"><span>全部用户 <strong>${data.stats.total}</strong></span><span>近 7 日新增 <strong>${data.stats.new_week}</strong></span><span>限制生成 <strong>${data.stats.restricted}</strong></span></div>
+      <form class="billing-filter billing-form admin-user-filter" data-form="user-filter"><label class="billing-field">搜索用户<input name="q" maxlength="64" value="${h(this.params.get('q') || '')}" placeholder="输入账号名或用户编号" autocomplete="off"></label><label class="billing-field">使用状态<select name="status">${[['','全部状态'],['active','正常使用'],['restricted','限制生成']].map(([value,label]) => `<option value="${value}" ${this.params.get('status') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><button class="button secondary">搜索用户</button>${filtered ? '<a class="text-link" href="#admin/users">清除筛选</a>' : ''}</form>
+      <section class="billing-card admin-user-list"><div class="admin-user-section-heading"><h2>${filtered ? '筛选结果' : '全部用户'}</h2><span>${data.total} 个账号 · 按注册时间倒序</span></div>
+      ${data.users.length ? `<table class="billing-table admin-user-table"><thead><tr><th>账号 / 状态</th><th>各项可用次数</th><th>订单</th><th>注册 / 登录</th><th><span class="admin-user-sr-only">操作</span></th></tr></thead><tbody>${rows}</tbody></table>` : `<p class="billing-empty">${filtered ? '没有匹配的用户。请调整账号名或状态筛选。' : '还没有注册用户。用户注册后会显示在这里。'}</p>`}
+      <nav class="billing-pager" aria-label="用户分页">${data.page > 0 ? `<a href="${h(pageLink(data.page-1))}">上一页</a>` : '<span></span>'}<span>第 ${data.page+1} / ${Math.max(1,Math.ceil(data.total/data.page_size))} 页</span>${(data.page+1)*data.page_size < data.total ? `<a href="${h(pageLink(data.page+1))}">下一页</a>` : '<span></span>'}</nav></section>`, '用户管理');
+  }
+  async loadUser(token = this.token) {
+    const detail = await this.request(`/api/admin/users/${this.route.split('/').at(-1)}`, undefined, true);
+    if (!this.active || token !== this.token) return;
+    this.userDetail = detail; this.renderAdminUser();
+  }
+  updateUserAction() {
+    const action = this.root.querySelector('#admin-user-action')?.value;
+    const help = this.root.querySelector('#admin-user-action-help'), button = this.root.querySelector('#admin-user-action-submit');
+    if (help) help.textContent = userActionHelp[action] || '选择要执行的操作，填写原因后确认。';
+    if (button) { button.textContent = userActions[action] || '选择一项操作'; button.disabled = !action; }
+  }
+  renderAdminUser() {
+    const d = this.userDetail, u = d.user, note = this.draft('user-note'), actionDraft = this.draft('user-action');
+    const options = [...(!u.welcome_granted ? ['grant_welcome'] : []), u.ai_restricted ? 'restore' : 'restrict', 'revoke_sessions'];
+    const selected = options.includes(actionDraft.action) ? actionDraft.action : '';
+    const back = this.userListReturn || 'admin/users';
+    this.shell(`${this.heading(h(u.username), '查看账号权益，处理使用权限与服务记录。', `<a class="text-link" href="#${h(back)}">← 返回用户列表</a><button class="text-link" data-billing="reload-user">刷新状态 ↻</button>`)}${this.adminTabs()}
+      <div class="admin-user-summary">${this.userTag(u)}<span class="admin-user-id">用户编号 ${h(u.id)}</span><span>${u.welcome_granted ? '已领取新用户体验' : '尚未领取新用户体验'}</span></div>
+      <dl class="admin-user-facts"><div><dt>注册时间</dt><dd>${h(this.dateText(u.created_at,true))}</dd></div><div><dt>最近登录</dt><dd>${u.last_login_at ? h(this.dateText(u.last_login_at,true)) : '暂无记录'}</dd></div><div><dt>有效登录</dt><dd>${d.active_sessions} 个会话</dd></div><div><dt>仍在保留期的报告</dt><dd>${d.report_count} 份</dd></div></dl>
+      <div class="admin-user-layout"><div class="admin-user-main">
+      <section class="billing-card"><div class="admin-user-section-heading"><h2>次数与使用情况</h2><span>生成时优先使用免费体验</span></div><p class="admin-user-mobile-hint">表格可左右滑动查看。</p><div class="billing-table-wrap"><table class="billing-table admin-user-wallet"><thead><tr><th>功能</th><th>可用</th><th>免费体验</th><th>已购可用</th><th>生成中</th><th>已使用</th><th>退款暂停</th></tr></thead><tbody>${Object.keys(kinds).map(k => { const b=u.wallet[k]; return `<tr><td>${kinds[k]}<small>按${units[k]}计次</small></td><td><strong>${b.available}</strong></td><td>${b.trial_available}</td><td>${b.available-b.trial_available}</td><td>${b.reserved}</td><td>${b.used}</td><td>${b.on_hold}</td></tr>`; }).join('')}</tbody></table></div></section>
+      <section class="billing-card"><div class="admin-user-section-heading"><h2>关联订单 <small>${u.order_count} 笔</small></h2><a class="text-link" href="#admin?owner=${h(u.id)}">查看全部 ↗</a></div><p class="billing-caption">累计实收 ${money(d.paid_cents)}，已扣除登记退款。${d.orders.length > 5 ? '下方显示最近 5 笔。' : ''}</p>${this.orderTable(d.orders.slice(0,5),true)}</section>
+      <section class="billing-card"><h2>管理操作记录</h2>${d.actions.length ? `<ol class="admin-user-audit">${d.actions.map(a => `<li><div><strong>${h(userActions[a.action] || a.action)}</strong><time>${h(this.dateText(a.created_at,true))}</time></div><p>${h(a.note || '已清空管理备注。')}${a.action === 'revoke_sessions' ? ` · 已退出 ${a.revoked_sessions} 个会话` : ''}</p></li>`).join('')}</ol><p class="billing-caption">显示最近 30 条记录，完整记录持续保留。</p>` : '<p class="billing-empty">还没有管理操作。保存备注或调整账号后，记录会显示在这里。</p>'}</section>
+      <details class="billing-card billing-details"><summary>最近的次数记录 · ${d.events.length} 条</summary>${d.events.length ? `<div class="billing-table-wrap"><table class="billing-table"><thead><tr><th>时间</th><th>功能</th><th>变动</th><th>来源</th></tr></thead><tbody>${d.events.map(e => `<tr><td>${h(this.dateText(e.created_at,true))}</td><td>${kinds[e.kind] || h(e.kind)}</td><td>${h(eventNames[e.event] || e.event)} · ${e.units}</td><td>${e.order_id ? `<a href="#admin/order/${h(e.order_id)}">${h(e.order_id.slice(0,8))}</a>` : '免费体验'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="billing-empty">还没有次数变动。</p>'}</details></div>
+      <aside class="admin-user-aside"><section class="billing-card"><h2>管理备注</h2><form class="billing-form" data-form="user-note" data-draft="user-note"><fieldset><label class="billing-field">跟进信息<textarea name="note" rows="4" maxlength="600" placeholder="记录需跟进的事项，避免填写密码或恢复码。">${h(note.note ?? d.note)}</textarea><small>仅管理后台可见，最多 600 个字符。</small></label><button class="button secondary full-width">保存管理备注</button></fieldset></form></section>
+      <section class="billing-card"><h2>账号操作</h2><form class="billing-form" data-form="user-action" data-draft="user-action"><fieldset><label class="billing-field">选择操作<select id="admin-user-action" name="action" required><option value="">请选择</option>${options.map(action => `<option value="${action}" ${action===selected ? 'selected' : ''}>${userActions[action]}</option>`).join('')}</select></label><p id="admin-user-action-help" class="billing-note">${h(userActionHelp[selected] || '选择要执行的操作，填写原因后确认。')}</p><label class="billing-field">操作原因<textarea name="note" rows="3" minlength="4" maxlength="600" required placeholder="例如：用户反馈未领取注册体验，经核对后补发。">${h(actionDraft.note || '')}</textarea><small>写明原因，供之后查询；用户端不会显示。</small></label><button id="admin-user-action-submit" class="button secondary full-width" ${selected ? '' : 'disabled'}>${userActions[selected] || '选择一项操作'}</button></fieldset></form>${u.welcome_granted ? '<p class="billing-help">此账号已领取四项体验，不能重复补发。</p>' : ''}</section></aside></div>`, '用户详情');
   }
   renderAdminOrders(orders) {
     this.shell(`${this.heading('到账核对，逐笔有记录', '只在确认实际收款后发放次数。退款需先在支付平台完成，再回到订单登记。', '<button class="text-link muted" data-billing="admin-logout">退出管理</button>')}${this.adminTabs()}
+      ${this.params.get('owner') ? `<p class="billing-note">正在查看这位用户的订单。<a class="text-link" href="#admin/users/${h(this.params.get('owner'))}">返回用户详情</a> · <a class="text-link" href="#admin">查看全部订单</a></p>` : ''}
       <form class="billing-filter billing-form" data-form="filter"><label class="billing-field">订单状态<select name="status">${[['','全部'],['submitted','待人工核款'],['refund_requested','待处理退款'],['paid','已发放'],['rejected','需补充核对'],['awaiting_payment','待付款'],['refunded','已退款'],['cancelled','已取消'],['expired','已过期']].map(([v,label]) => `<option value="${v}" ${this.params.get('status') === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="billing-field">搜索账号或订单编号<input name="q" maxlength="64" value="${h(this.params.get('q') || '')}" placeholder="输入账号名或订单编号"></label><button class="button secondary">筛选订单</button></form><section class="billing-card">${this.orderTable(orders, true)}${this.pager(orders, 'admin')}</section>`, '订单核对');
   }
   captureSettings() {
@@ -293,7 +362,18 @@ export class BillingUI {
         this.admin = await this.request('/api/admin/login', {key:values.key});
         form.reset(); if (this.active && token === this.token) await this.open(`${this.route}${this.query ? `?${this.query}` : ''}`);
       } else if (type === 'filter') {
-        await this.go(`admin?${new URLSearchParams({status:values.status, q:values.q})}`);
+        const params = new URLSearchParams({status:values.status, q:values.q});
+        if (this.params.get('owner')) params.set('owner', this.params.get('owner'));
+        await this.go(`admin?${params}`);
+      } else if (type === 'user-filter') {
+        await this.go(`admin/users?${new URLSearchParams({q:values.q.trim(),status:values.status})}`);
+      } else if (type === 'user-note' || type === 'user-action') {
+        const action = type === 'user-note' ? 'note' : values.action;
+        const u = this.userDetail.user;
+        if (action !== 'note' && !window.confirm(`确认对账号「${u.username}」执行“${userActions[action]}”？\n\n${userActionHelp[action]}`)) return;
+        const detail = await this.request(`/api/admin/users/${u.id}`, {action,revision:u.revision,note:values.note,confirmed:true}, true);
+        this.drafts.delete(`${this.route}:${type}`);
+        if (this.active && token === this.token) { this.userDetail = detail; this.renderAdminUser(); this.toast(`${userActions[action]}：已完成。`); }
       } else if (type === 'settings') {
         const s = structuredClone(this.settingsDraft);
         for (const p of s.plans) { p.price_cents = cents(String(p.priceText ?? p.price_cents / 100)); delete p.priceText; for (const k of Object.keys(kinds)) p.credits[k] = Number(p.credits[k]); }
@@ -307,7 +387,9 @@ export class BillingUI {
       }
     } catch (error) {
       if (this.active && token === this.token) {
+        if (type !== 'auth' && await this.recoverSession(error, token)) return;
         if (error.status === 409 && ['review','claim'].includes(type)) { await this.loadOrder(token).catch(() => {}); }
+        if (error.status === 409 && ['user-note','user-action'].includes(type)) { await this.loadUser(token).catch(() => {}); }
         this.message(error.message);
       }
     } finally { this.busy = false; for (const fieldset of form.querySelectorAll('fieldset')) fieldset.disabled = false; }
@@ -320,6 +402,7 @@ export class BillingUI {
     try {
       if (action === 'reload') { await this.open(`${this.route}${this.query ? `?${this.query}` : ''}`); return; }
       if (action === 'reload-order') { await this.loadOrder(token); return; }
+      if (action === 'reload-user') { await this.loadUser(token); return; }
       if (action === 'copy-recovery') { try { await navigator.clipboard.writeText(this.recovery.code); this.toast('账号恢复码已复制，请妥善保存。'); } catch { this.toast('请手动选中恢复码并复制。'); } return; }
       if (action === 'download-recovery') { this.downloadBlob(`岗位罗盘账号恢复凭据\n网站：${location.origin}\n账号：${this.recovery.username}\n账号恢复码：${this.recovery.code}\n\n此码可以重设账号密码并获得购买权益，请勿公开。每次重设后会更换，旧码失效。它与报告恢复码不同。`, '岗位罗盘-账号恢复凭据.txt'); return; }
       if (action === 'saved-recovery') { this.recovery = null; this.root.querySelector('.billing-recovery')?.remove(); return; }
@@ -351,7 +434,7 @@ export class BillingUI {
       const result = await this.request(`/api/${this.isAdmin ? 'admin' : 'billing'}/orders/${this.order.id}`, fields, this.isAdmin);
       this.drafts.delete(`${this.route}:review`);
       if (this.active && token === this.token) { this.order = result; this.renderOrder(); }
-    } catch (error) { if (this.active && token === this.token) { if (error.status === 409) await this.loadOrder(token).catch(() => {}); this.message(error.message); } }
+    } catch (error) { if (this.active && token === this.token) { if (await this.recoverSession(error, token)) return; if (error.status === 409) await this.loadOrder(token).catch(() => {}); this.message(error.message); } }
     finally { this.busy = false; }
   }
 }

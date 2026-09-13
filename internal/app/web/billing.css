@@ -6,3 +6,49 @@
 
 .billing-qr-summary{text-align:center;font-size:12px;overflow-wrap:anywhere}.billing-qr-summary strong{font:30px/1.8 var(--mono);color:var(--green)}
 @media(max-width:700px){.billing-receipt.payment-open .billing-receipt-side{grid-row:1;border-top:0;border-bottom:1px dashed #b9cfc3}}
+
+/* User management keeps account identity next to the four feature balances. */
+.billing-tabs{flex-wrap:wrap;row-gap:12px}
+.admin-user-stats{display:flex;flex-wrap:wrap;gap:14px 32px;padding:0 0 24px;font-size:12px;color:var(--muted)}
+.admin-user-stats strong{font:500 20px/1.4 var(--mono);color:var(--ink);margin-left:7px}
+.admin-user-filter .billing-field:first-child{flex:2}
+.admin-user-filter .text-link{padding-bottom:12px}
+.admin-user-section-heading{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;margin-bottom:14px}
+.admin-user-section-heading h2{margin:0}
+.admin-user-section-heading>span,.admin-user-section-heading h2 small{font:400 11px/1.6 var(--sans);color:var(--muted)}
+.admin-user-table td{vertical-align:middle}
+.admin-user-table .admin-user-name{display:inline-block;max-width:240px;font-weight:600;font-size:13px;overflow-wrap:anywhere;text-decoration:none}
+.admin-user-status{display:inline-flex;align-items:center;gap:5px;font-size:10px;white-space:nowrap;color:var(--green);padding:3px 0}
+.admin-user-status:before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
+.admin-user-status.restricted{color:var(--red)}
+.admin-user-identity .admin-user-status{display:flex}
+.admin-user-balances{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 20px;font-size:10px;color:var(--muted)}
+.admin-user-balances span{display:flex;justify-content:space-between;align-items:baseline;gap:12px;white-space:nowrap}
+.admin-user-balances strong{font:500 14px/1.5 var(--mono);color:var(--ink)}
+.admin-user-dates{font-size:11px;white-space:nowrap}
+.admin-user-table .admin-user-dates small{font-family:var(--sans);font-size:10px}
+.admin-user-detail-link{white-space:nowrap}
+.admin-user-summary{display:flex;flex-wrap:wrap;align-items:center;gap:12px 22px;font-size:11px;color:var(--muted);margin:0 0 18px}
+.admin-user-summary .admin-user-status{font-size:12px}
+.admin-user-id{font-family:var(--mono);overflow-wrap:anywhere;min-width:0}
+.admin-user-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:20px 0;margin:0 0 26px}
+.admin-user-facts dt{font-size:10px;color:var(--muted);margin-bottom:7px}
+.admin-user-facts dd{font-size:12px;margin:0;overflow-wrap:anywhere}
+.admin-user-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start}
+.admin-user-layout>*{min-width:0}
+.admin-user-layout .billing-card{padding:22px}
+.admin-user-wallet{min-width:510px}
+.admin-user-wallet td:not(:first-child){font-family:var(--mono);font-size:13px}
+.admin-user-wallet td strong{font-size:20px;font-weight:500;color:var(--green)}
+.admin-user-wallet th,.admin-user-wallet td{padding:14px 8px;white-space:nowrap}
+.admin-user-audit{list-style:none;margin:0 0 18px;padding:0}
+.admin-user-audit li{padding:15px 0;border-bottom:1px solid var(--line)}
+.admin-user-audit li:first-child{padding-top:0}
+.admin-user-audit li>div{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:12px}
+.admin-user-audit time{font-size:10px;color:var(--muted)}
+.admin-user-audit p{font-size:11px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;margin-top:6px}
+.admin-user-aside .billing-note{margin:0 0 18px;font-size:11px}
+.admin-user-mobile-hint{display:none;font-size:10px;color:var(--muted);margin-bottom:10px}
+.admin-user-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(max-width:1000px){.admin-user-layout{grid-template-columns:minmax(0,1fr)}.admin-user-aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;grid-row:2}.admin-user-aside .billing-card+.billing-card{margin-top:0}.admin-user-balances{gap:6px 12px}}
+@media(max-width:700px){.admin-user-stats{gap:10px 20px}.admin-user-stats strong{font-size:17px}.admin-user-list{padding:18px}.admin-user-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.admin-user-table tbody{display:block}.admin-user-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px 14px;padding:18px 0;border-bottom:1px solid var(--line)}.admin-user-table td{padding:0!important;border:0;font-size:11px;text-align:left!important;min-width:0}.admin-user-table td[data-label]:before{content:attr(data-label)' ';color:var(--muted)}.admin-user-identity,.admin-user-balance-cell{grid-column:1/-1}.admin-user-table .admin-user-name{max-width:100%;font-size:14px}.admin-user-identity .admin-user-status{display:inline-flex;margin-left:12px}.admin-user-balances{padding:12px 14px;background:var(--canvas);border-radius:5px;gap:8px 24px}.admin-user-dates{white-space:normal;text-align:right}.admin-user-detail-link{grid-column:1/-1}.admin-user-detail-link a{display:inline-block;padding:5px 0}.admin-user-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-user-layout .billing-card{padding:18px}.admin-user-aside{display:block}.admin-user-aside .billing-card+.billing-card{margin-top:18px}.admin-user-mobile-hint{display:block}.admin-user-summary{gap:8px 16px}.admin-user-summary .admin-user-id{flex-basis:100%;font-size:10px}.admin-user-filter .text-link{padding-bottom:0}}

@@ -99,6 +99,7 @@ type BillingAccount struct {
 	Username       string `json:"username"`
 	CreatedAt      int64  `json:"created_at"`
 	WelcomeGranted bool   `json:"welcome_granted"`
+	AIRestricted   bool   `json:"ai_restricted"`
 }
 
 type CreditBalance struct {
@@ -147,6 +148,7 @@ type BillingRefund struct {
 type BillingOrder struct {
 	ID                string          `json:"id"`
 	OwnerID           string          `json:"-"`
+	AccountID         string          `json:"account_id,omitempty"`
 	Username          string          `json:"username,omitempty"`
 	PlanName          string          `json:"plan_name"`
 	AmountCents       int64           `json:"amount_cents"`

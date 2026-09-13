@@ -284,8 +284,8 @@ func TestWelcomeMigrationPreservesV3PaidUsage(t *testing.T) {
 		wantBalance(t, n, kind, CreditBalance{Available: 1, TrialAvailable: 1})
 	}
 	var version, violations int
-	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 4 {
-		t.Fatal("v4 missing", err)
+	if err = a.store.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil || version != 5 {
+		t.Fatal("v5 missing", err)
 	}
 	if err = a.store.db.QueryRow("SELECT COUNT(*) FROM pragma_foreign_key_check").Scan(&violations); err != nil || violations != 0 {
 		t.Fatal("migration broke references", err)

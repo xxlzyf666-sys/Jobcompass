@@ -67,7 +67,13 @@ func (a *App) preparationResponse(w http.ResponseWriter, r *http.Request, owner 
 		preparationError(w, err)
 		return
 	}
-	jsonResponse(w, status, map[string]any{"preparation": p, "task": task, "expires_at": expires, "ready": a.provider.Ready() && supported, "billing_enabled": settings.Enabled})
+	account, err := a.store.BillingAccount(r.Context(), owner)
+	if err != nil {
+		preparationError(w, err)
+		return
+	}
+	restricted := account != nil && account.AIRestricted
+	jsonResponse(w, status, map[string]any{"preparation": p, "task": task, "expires_at": expires, "ready": a.provider.Ready() && supported, "billing_enabled": settings.Enabled, "ai_restricted": restricted})
 }
 func (a *App) getPreparation(w http.ResponseWriter, r *http.Request) {
 	owner, ok := a.authorize(w, r, false)

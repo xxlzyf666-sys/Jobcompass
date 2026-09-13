@@ -62,8 +62,14 @@ async function bootstrap() {
 
 function updateBillingHints() {
   if (!state.config) return;
+  $('#submit-diagnosis').disabled = state.submitting || !state.config.ready || Boolean(state.config.account?.ai_restricted);
   $('#account-nav').textContent = state.config.account ? '账号与次数' : '登录 / 免费体验';
   $('#welcome-offer').hidden = Boolean(state.config.account);
+  if (state.config.account?.ai_restricted) {
+    $('#diagnosis-cost').hidden = false;
+    $('#diagnosis-cost').innerHTML = '<span>这个账号暂时限制 AI 生成，已有材料和次数仍保留。</span><a href="#account">查看账号 / 联系运营者 ↗</a>';
+    return;
+  }
   $('#diagnosis-cost').hidden = !state.config.billing_enabled;
   $('#diagnosis-cost').innerHTML = '<span>'+(state.config.account ? '本次诊断预占 1 次，优先使用免费体验次数；生成成功后扣除，最终失败自动退回。' : '新账号注册可免费诊断 1 次，生成最终失败会退回体验次数。')+'</span><a href="'+(state.config.account ? '#account' : '#account/register?next=start')+'">'+(state.config.account ? '查看次数 / 购买' : '注册免费体验')+' ↗</a>';
 }
@@ -356,7 +362,7 @@ $('#diagnosis-form').addEventListener('submit', async (event) => {
     location.hash = `report/${result.id}`;
     window.scrollTo({ top: 0, behavior: motion() });
   } catch (error) { showError($('#form-error'), error.message); if (error.status === 402) { $('#form-error').innerHTML = `${escapeHTML(error.message)} <a class="text-link" href="${error.code === 'account_required' ? '#account/login?next=start' : '#account'}">前往账号页 ↗</a>（填写的材料会保留在当前页面）`; } }
-  finally { state.submitting = false; $('#submit-diagnosis').disabled = !state.config?.ready; $('#submit-diagnosis span:first-child').textContent = '开始逐项诊断'; }
+  finally { state.submitting = false; updateBillingHints(); $('#submit-diagnosis span:first-child').textContent = '开始逐项诊断'; }
 });
 
 $('#recover-form').addEventListener('submit', async (event) => {

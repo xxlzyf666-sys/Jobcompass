@@ -97,6 +97,10 @@ func OpenStore(directory string, key []byte) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate welcome credits: %w", err)
 	}
+	if err = s.migrateAccountAdmin(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate account management: %w", err)
+	}
 	return s, nil
 }
 
@@ -189,6 +193,9 @@ func (s *Store) Create(ctx context.Context, owner, ip string, input Input, confi
 		return "", "", false, err
 	}
 	defer tx.Rollback()
+	if err = s.allowAccountAI(ctx, tx, owner); err != nil {
+		return "", "", false, err
+	}
 	err = tx.QueryRowContext(ctx, "SELECT id FROM diagnoses WHERE dedup_hash=? AND expires_at>? AND status!='failed' ORDER BY created_at DESC LIMIT 1", dedup, now.Unix()).Scan(&id)
 	if err == nil {
 		return id, "", true, nil

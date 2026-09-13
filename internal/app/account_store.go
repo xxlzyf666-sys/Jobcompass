@@ -64,6 +64,9 @@ func (s *Store) accountSession(ctx context.Context, tx *sql.Tx, oldToken, owner 
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO sessions(token_hash,owner_id,expires_at) VALUES(?,?,?)", digest(token), owner, now.Add(30*24*time.Hour).Unix())
+	if err == nil {
+		_, err = tx.ExecContext(ctx, "UPDATE billing_accounts SET last_login_at=? WHERE owner_id=?", now.Unix(), owner)
+	}
 	return token, err
 }
 

@@ -36,9 +36,10 @@ export class PreparationUI {
   get busy() { return this.sending || ['pending', 'running'].includes(this.data?.task?.status); }
   get demo() { return this.id === 'example'; }
   get blocked() { return this.busy || this.demo; }
-  get aiBlocked() { return this.blocked || !this.data?.ready; }
+  get aiBlocked() { return this.blocked || !this.data?.ready || (!this.demo && this.data?.ai_restricted); }
   get paid() { return !this.demo && (this.data?.billing_enabled ?? this.config()?.billing_enabled); }
   cost(kind) {
+    if (!this.demo && this.data?.ai_restricted) return '<div class="billing-note pending" role="status">这个账号暂时限制 AI 生成。已有材料仍可查看、编辑和导出；如需恢复，请到<a class="text-link" href="#account">账号页</a>联系运营者。</div>';
     if (!this.paid) return '';
     const text = {refine:'生成追问使用 1 轮精修，包含一次回答后的改写。重新生成追问开启新一轮。',tailor:'每次按岗位生成建议使用 1 次岗位适配；手动编辑、采纳和导出不扣次。',interview:'首题生成后使用 1 场面试，包含最多 5 题、反馈及复盘。提前结束仍计 1 场。'}[kind];
     return `<div class="billing-cost prep-billing-cost"><span>${text} 优先使用免费体验次数，最终生成失败退回次数，手动重试会重新预占。</span><a href="${this.config()?.account ? '#account' : `#account/login?next=${encodeURIComponent(`prepare/${this.id}/${this.tab}`)}`}">查看次数 / 登录 ↗</a></div>`;
